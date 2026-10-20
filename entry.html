@@ -71,6 +71,17 @@ nav.tabs{display:flex;gap:2px;overflow-x:auto;margin-top:2px}
 nav.tabs button{border:0;background:none;padding:11px 14px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:3px solid transparent;white-space:nowrap}
 nav.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
 main{padding-block:18px 48px;display:grid;gap:18px}
+.permits{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;background:var(--warn-soft);border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));border-radius:var(--r);padding:10px 14px}
+.permits .ptitle{display:grid;gap:1px;min-width:180px}
+.permits .ptitle strong{color:var(--warn)}
+.permits .ptitle span{font-size:12px;color:var(--muted)}
+.plist2{display:flex;flex-wrap:wrap;gap:6px;flex:1 1 300px;min-width:0}
+.pitem{display:grid;text-align:left;gap:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:5px 10px;cursor:pointer;color:inherit;font:inherit}
+.pitem strong{font-size:13px}
+.pitem span{font-size:12px;color:var(--muted)}
+.pitem.urgent{border-color:var(--warn)}
+.pitem.urgent span{color:var(--warn);font-weight:600}
+.pitem:hover{background:var(--sunk)}
 .datebox{display:flex;gap:6px;position:relative}
 .datebox input[type=text]{flex:1;min-width:0;font-family:var(--font-mono);letter-spacing:.02em}
 .datebox input.bad{border-color:var(--warn);background:var(--warn-soft)}
@@ -254,6 +265,7 @@ dialog::backdrop{background:rgba(10,12,10,.45)}
 
 <main class="wrap" id="main">
   <div id="dueBox"></div>
+  <div id="permitBox"></div>
   <div id="noticeBox"></div>
   <section id="view-roster"></section>
   <section id="view-grid" hidden></section>
@@ -650,7 +662,7 @@ function render(){
     const sm=document.querySelector(".brand small"); if(sm) sm.textContent="Data entry · daily site roster"; }
   document.querySelectorAll("nav.tabs button").forEach(b=>{ b.setAttribute("aria-selected",String(b.dataset.tab===S.tab)); if(IS_ENTRY) b.hidden=!ENTRY_TABS.includes(b.dataset.tab); });
   TABS.forEach(t=>{$("#view-"+t).hidden = t!==S.tab});
-  renderDue();
+  renderDue(); renderPermits();
   let notice="";
   if(isReady() && S.settings.sample) notice=`<div class="notice"><p><strong>Sample roster loaded.</strong> The 22 workers, 15 sites, site pay rules and October hours are examples. Replace them in <em>Project/Sites</em>.</p>${S.canWrite?'<button class="btn" id="dismissSample">Hide this notice</button>':''}</div>`;
   else if(S.mode==="local" && isReady() && !S.settings.localNoticeHidden) notice=`<div class="notice"><p><strong>Saved in this browser.</strong> Your roster is stored on this device and browser only. Download a backup regularly from <em>Pay rules</em>. To share one roster between managers, connect Supabase (see the README).</p><button class="btn" id="hideLocalNotice">Got it</button></div>`;
@@ -1097,6 +1109,16 @@ function exFilename(){ const s=EX.site==="all"?"all-sites":String(siteCode(EX.si
 
 /* ---------- worker profiles ---------- */
 const PR = {wid:"", q:"", year:0, cache:{}, ytd:null, loading:false};
+function renderPermits(){
+  const box=$("#permitBox"); if(!box) return;
+  if(!isReady() || (S.mode==="supabase" && S.auth)){ box.innerHTML=""; return; }
+  const list=workerList().map(w=>({w,ps:permitState(w)})).filter(x=>x.ps&&x.ps.cls==="warn").sort((a,b)=>a.ps.days-b.ps.days);
+  if(!list.length){ box.innerHTML=""; return; }
+  const expired=list.filter(x=>x.ps.days<0).length, soon=list.length-expired;
+  const item=x=>{ const d=x.ps.days, when=d<0?`expired ${-d} day${d===-1?"":"s"} ago`:d===0?"expires today":`expires in ${d} day${d===1?"":"s"}`;
+    return `<button class="pitem${d<=30?" urgent":""}" data-profile="${esc(x.w.id)}" title="Open profile"><strong>${esc(wl(x.w))}</strong><span>${when} · ${esc(fmtDate(x.w.permitExpiry))}</span></button>`; };
+  box.innerHTML=`<div class="permits" role="status"><div class="ptitle"><strong>Work permits need attention</strong><span>${expired?`${expired} expired`:""}${expired&&soon?" · ":""}${soon?`${soon} expiring within 60 days`:""}</span></div><div class="plist2">${list.map(item).join("")}</div></div>`;
+}
 function permitState(w){ if(!w.permitExpiry) return null; const t=new Date(); t.setHours(0,0,0,0); const e=new Date(w.permitExpiry+"T00:00:00");
   const days=Math.round((e-t)/86400000); if(days<0) return {cls:"warn",txt:"Permit expired",days}; if(days<=60) return {cls:"warn",txt:`Permit expires in ${days} day${days===1?"":"s"}`,days}; return {cls:"ok",txt:"Permit valid",days}; }
 function fmtDate(iso){ if(!iso) return ""; const d=new Date(iso+"T00:00:00"); return `${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)} ${d.getFullYear()}`; }
