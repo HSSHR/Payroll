@@ -15,6 +15,7 @@ window.SUPABASE_CONFIG = {
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <title>Site Payroll Board</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23e0a100%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Arial%27 font-weight=%27700%27 font-size=%2716%27 text-anchor=%27middle%27 fill=%27%232a2000%27%3ESP%3C/text%3E%3C/svg%3E">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -1164,10 +1165,10 @@ function renderProfiles(){
       <div class="grid2">
         <div class="panel"><div class="panel-head"><h2>Details</h2><p>Changes save as you leave each field.</p></div>
           <div class="settings" style="max-width:none;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-            ${f("name","Full name")}
+            ${f("name","Full name")}${f("dob","Date of birth","date",' max="'+new Date().toISOString().slice(0,10)+'"')}
             <label for="pf-rate">Base rate per hour<input type="number" min="0" step="0.5" id="pf-rate" data-wid="${id}" data-k="rate" value="${w.rate??""}"${dis}></label>
             ${f("phone","Phone","tel")}${f("nationality","Nationality")}
-            ${openAccess()?"":f("idNo","FIN / work permit no.")}${f("permitExpiry","Work permit expiry","date")}
+            ${f("idNo","FIN no.")}${f("permitExpiry","Work permit expiry","date")}
             ${f("joined","Date joined","date")}${openAccess()?"":f("bank","Bank account / PayNow")}
             ${f("emergency","Emergency contact")}
             <label class="check" for="pf-active" style="align-self:center"><input type="checkbox" id="pf-active" data-wid="${id}" data-k="active"${w.active!==false?" checked":""}${dis}> <span>Active (shows on the roster)</span></label>
