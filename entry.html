@@ -328,7 +328,8 @@ const hrs = n => (Math.round(n*10)/10).toLocaleString("en-SG");
 
 /* ---------- lists ---------- */
 const byOrder = (a,b)=>(a.order??999)-(b.order??999)||String(a.name).localeCompare(String(b.name));
-const allWorkers = () => Object.entries(S.workers).map(([id,w])=>({id,...w})).sort(byOrder);
+const byName = (a,b)=>String(a.name||"").trim().localeCompare(String(b.name||"").trim(),"en",{sensitivity:"base",numeric:true}) || String(a.empId||"").localeCompare(String(b.empId||""),"en",{numeric:true});
+const allWorkers = () => Object.entries(S.workers).map(([id,w])=>({id,...w})).sort(byName);
 const workerList = () => allWorkers().filter(w=>w.active!==false);
 const wl = w => String((w&&w.name)||"") + (w&&w.empId ? " ("+w.empId+")" : "");
 const siteList = () => Object.entries(S.sites).map(([id,s])=>({id,...s})).sort(byOrder);
@@ -1030,7 +1031,7 @@ function exCompute(months){
     });
   }
   T.net=T.gross+T.adj;
-  return {T, W:Object.values(W).sort((a,b)=>byOrder(a.w,b.w)), SC:Object.values(SC).sort((a,b)=>a.key.localeCompare(b.key)||byOrder(S.sites[a.sid]||{name:"~"},S.sites[b.sid]||{name:"~"})), rows};
+  return {T, W:Object.values(W).sort((a,b)=>byName(a.w,b.w)), SC:Object.values(SC).sort((a,b)=>a.key.localeCompare(b.key)||byOrder(S.sites[a.sid]||{name:"~"},S.sites[b.sid]||{name:"~"})), rows};
 }
 function exTable(res){
   const st=S.settings, adjCols=EX.site==="all";
