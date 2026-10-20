@@ -1153,7 +1153,7 @@ function renderProfiles(){
             ${f("name","Full name")}${f("dob","Date of birth","date",' max="'+new Date().toISOString().slice(0,10)+'"')}
             <label for="pf-rate">Base rate per hour<input type="number" min="0" step="0.5" id="pf-rate" data-wid="${id}" data-k="rate" value="${w.rate??""}"${dis}></label>
             ${f("phone","Phone","tel")}${f("nationality","Nationality")}
-            ${f("idNo","FIN no.")}${f("permitExpiry","Work permit expiry","date")}
+            ${f("idNo","FIN no.")}${f("permitNo","Work permit no.")}${f("permitExpiry","Work permit expiry","date")}
             ${f("joined","Date joined","date")}${openAccess()?"":f("bank","Bank account / PayNow")}
             ${f("emergency","Emergency contact")}
             <label class="check" for="pf-active" style="align-self:center"><input type="checkbox" id="pf-active" data-wid="${id}" data-k="active"${w.active!==false?" checked":""}${dis}> <span>Active (shows on the roster)</span></label>
