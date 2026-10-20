@@ -14,7 +14,7 @@ window.SUPABASE_CONFIG = {
 };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<title>Site Payroll Board</title>
+<title>Hong Soon Seng Payroll</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23e0a100%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Arial%27 font-weight=%27700%27 font-size=%2716%27 text-anchor=%27middle%27 fill=%27%232a2000%27%3ESP%3C/text%3E%3C/svg%3E">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -221,7 +221,7 @@ dialog::backdrop{background:rgba(10,12,10,.45)}
   <div class="wrap">
     <div class="brand">
       <small>Construction payroll · daily site roster</small>
-      <h1 id="companyName">Site Payroll Board</h1>
+      <h1 id="companyName">Hong Soon Seng</h1>
     </div>
     <div class="month">
       <button class="btn icon" id="prevM" aria-label="Previous month">‹</button>
@@ -270,7 +270,8 @@ const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const TABS = ["roster","grid","payroll","sites","profiles","team","settings"];
 const OFF = "off";
 const DUE_HOUR = 18;
-const DEFAULT_SETTINGS = {company:"Site Payroll Board", currency:"S$", ot15:1.5, ot20:2.0, otLimit:72, dayHours:8, autoFill:true, skipSun:true, sample:false};
+const COMPANY = "Hong Soon Seng";
+const DEFAULT_SETTINGS = {company:COMPANY, currency:"S$", ot15:1.5, ot20:2.0, otLimit:72, dayHours:8, autoFill:true, skipSun:true, sample:false};
 
 const S = {
   db:null, live:false, canWrite:true, loaded:{workers:false,sites:false,settings:false,month:false},
@@ -634,7 +635,7 @@ function render(){
   const so=$("#signOut"); if(so){ so.hidden=!(S.mode==="supabase"&&S.live&&SUPA.requireLogin); if(S.user) so.title="Signed in as "+(S.user.email||""); }
   if(S.mode==="supabase" && S.auth){ TABS.forEach(t=>{$("#view-"+t).hidden=true}); $("#dueBox").innerHTML=""; $("#noticeBox").innerHTML=authView(); document.querySelector("nav.tabs").hidden=true; return; }
   document.querySelector("nav.tabs").hidden=false;
-  $("#companyName").textContent = S.settings.company || "Site Payroll Board";
+  $("#companyName").textContent = COMPANY;
   $("#monthLabel").textContent = labelOf(S.monthKey);
   const lk=locked(); const chip=$("#lockChip"); chip.className="chip "+(lk?"ok":"draft"); chip.textContent=lk?"Finalised":"Draft";
   const lb=$("#lockBtn"); lb.textContent=lk?"Reopen month":"Finalise month"; lb.disabled=!S.canWrite||!isReady();
@@ -1192,7 +1193,7 @@ function openSlip(wid){
   const siteRows=Object.entries(m.bySite).sort((a,b)=>b[1].pay-a[1].pay).map(([sid,b])=>`<tr><td>${esc(sid?siteName(sid):"No site")}</td><td class="num mono">${b.days} d · ${hrs(b.n+b.o+b.h)} h</td><td class="num mono">@ ${b.rate.toFixed(2)}</td><td class="num mono">${fmt(b.pay)}</td></tr>`).join("");
   $("#slipBody").innerHTML=`
     <header><div><h3>${esc(wl(w))}</h3><div class="meta">${m.days} days · ${m.siteCount} site${m.siteCount===1?"":"s"}</div></div>
-    <div class="meta" style="text-align:right">${esc(st.company)}<br>Payslip · ${esc(labelOf(S.monthKey))}</div></header>
+    <div class="meta" style="text-align:right">${esc(COMPANY)}<br>Payslip · ${esc(labelOf(S.monthKey))}</div></header>
     <h4>Earnings by site</h4>
     <table><tbody>${siteRows||'<tr><td colspan="4">No hours this month.</td></tr>'}</tbody></table>
     <h4>Summary</h4>
@@ -1210,7 +1211,7 @@ function openSlip(wid){
 }
 function slipText(wid){ const w=S.workers[wid], m=monthOf(wid), st=S.settings;
   const sites=Object.entries(m.bySite).map(([sid,b])=>`  ${sid?siteName(sid):"No site"}: ${b.days} days, ${hrs(b.n+b.o+b.h)} h @ ${b.rate.toFixed(2)} = ${fmt(b.pay)}`).join("\n");
-  return `${st.company} — Payslip ${labelOf(S.monthKey)}\n${wl(w)} · ${m.days} days\n${sites}\nNormal ${hrs(m.normal)} h = ${fmt(m.normalPay)}\nOT ${st.ot15}× ${hrs(m.ot15)} h = ${fmt(m.ot15Pay)}\nRD/PH ${st.ot20}× ${hrs(m.ot20)} h = ${fmt(m.ot20Pay)}\nGross: ${fmt(m.gross)}\nAdjustments: ${fmt(m.adj)}\nNET PAY: ${fmt(m.net)}`; }
+  return `${COMPANY} — Payslip ${labelOf(S.monthKey)}\n${wl(w)} · ${m.days} days\n${sites}\nNormal ${hrs(m.normal)} h = ${fmt(m.normalPay)}\nOT ${st.ot15}× ${hrs(m.ot15)} h = ${fmt(m.ot15Pay)}\nRD/PH ${st.ot20}× ${hrs(m.ot20)} h = ${fmt(m.ot20Pay)}\nGross: ${fmt(m.gross)}\nAdjustments: ${fmt(m.adj)}\nNET PAY: ${fmt(m.net)}`; }
 
 /* ---------- CSV ---------- */
 const cell=v=>{const s=String(v??""); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
