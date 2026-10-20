@@ -264,6 +264,7 @@ dialog::backdrop{background:rgba(10,12,10,.45)}
 </main>
 
 <dialog id="slipDlg"><div class="slip" id="slipBody"></div></dialog>
+<dialog id="impDlg" style="width:min(1100px,calc(100vw - 32px))"><div class="slip" id="impBody"></div></dialog>
 
 <script>
 (() => {
@@ -1135,6 +1136,110 @@ function saveDate(wid,k,iso,input){ if(k==="dob" && iso && iso>new Date().toISOS
   S.workers[wid]={...S.workers[wid],[k]:iso}; saveDoc("workers",wid,{[k]:iso},true);
   const a=document.getElementById("age-"+k); if(a) a.textContent = iso&&k==="dob" ? "· age "+ageOf(iso) : "";
   const pk=document.getElementById("pk-"+k); if(pk) pk.value=iso; }
+/* ---------- import workers from CSV / Excel ---------- */
+const IMP = {rows:null, fmt:"", file:"", dropPlaceholders:true};
+const IMP_FIELDS = {
+  name:["name","full name","worker name","employee name"],
+  empId:["worker id","id","employee id","emp id","staff id","employee no","emp no"],
+  permitNo:["work permit no","work permit number","wp no","wp number","permit no","work permit"],
+  idNo:["fin","fin no","fin number","nric","nric/fin","fin/nric"],
+  nationality:["nationality","nationality/citizenship","citizenship","country"],
+  dob:["date of birth","dob","birth date","birthday"],
+  permitIssue:["date of work permit issue","work permit issue","issue date","date of issue","wp issue date"],
+  permitRenewal:["date of work permit renewal","work permit renewal","renewal date","date of renewal","wp renewal date"],
+  permitExpiry:["date of work permit expiry","work permit expiry","expiry date","date of expiry","wp expiry","wp expiry date","expiry"],
+  joined:["date joined","joined","join date","start date","date of joining"],
+  levy:["current levy rate","levy rate","levy","monthly levy"],
+  levyTier:["r1/r2 indicator","r1/r2","levy tier","tier","skill level"],
+  phone:["phone","phone no","mobile","contact","contact no","hp"],
+  rate:["base rate","base rate per hour","hourly rate","rate","rate per hour"],
+  emergency:["emergency contact","emergency"],
+  bank:["bank","bank account","paynow","bank account / paynow"],
+  notes:["notes","remarks","remark"]
+};
+const IMP_DATES=["dob","permitIssue","permitRenewal","permitExpiry","joined"];
+const normHead = h => String(h||"").toLowerCase().replace(/[.:#*]/g,"").replace(/\s+/g," ").trim();
+const normPermit = v => String(v||"").replace(/\s+/g,"").toUpperCase();
+function parseCSV(text){
+  const rows=[]; let row=[], cell="", q=false;
+  text=String(text).replace(/^﻿/,"");
+  for(let i=0;i<text.length;i++){ const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){ cell+='"'; i++; } else q=false; } else cell+=c; continue; }
+    if(c==='"') q=true; else if(c===","){ row.push(cell); cell=""; } else if(c==="\n"||c==="\r"){ if(c==="\r"&&text[i+1]==="\n") i++; row.push(cell); rows.push(row); row=[]; cell=""; } else cell+=c; }
+  if(cell!==""||row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r=>r.some(x=>String(x).trim()!==""));
+}
+function loadXlsxLib(){ return window.XLSX ? Promise.resolve(window.XLSX) : new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; s.onload=()=>res(window.XLSX); s.onerror=()=>rej(new Error("Excel reader didn't load")); document.head.appendChild(s); }); }
+function detectDateOrder(rows,cols){ let dmy=0, mdy=0;
+  for(const r of rows) for(const c of cols){ const m=/^\s*(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\s*$/.exec(r[c]||""); if(!m) continue; if(+m[1]>12) dmy++; if(+m[2]>12) mdy++; }
+  return mdy>dmy ? "mdy" : "dmy"; }
+function toIsoDate(v,order){ const t=String(v||"").trim(); if(!t) return "";
+  if(/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0,10);
+  if(/^\d{5}$/.test(t)){ const d=new Date(Math.round((+t-25569)*864e5)); return d.toISOString().slice(0,10); }
+  const m=/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/.exec(t); if(!m) { const d=new Date(t); return isNaN(d)?null:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+  const a=+m[1], b=+m[2]; let y=+m[3]; if(m[3].length===2) y+= y>(new Date().getFullYear()%100)+5?1900:2000;
+  const [d,mo]= order==="mdy"?[b,a]:[a,b]; const dt=new Date(y,mo-1,d);
+  if(dt.getMonth()!==mo-1||dt.getDate()!==d) return null;
+  return `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
+function buildImport(table){
+  if(!table.length) throw new Error("The file is empty.");
+  const head=table[0].map(normHead); const map={};
+  for(const [k,aliases] of Object.entries(IMP_FIELDS)){ const i=head.findIndex(h=>aliases.includes(h)); if(i>=0) map[k]=i; }
+  if(map.name===undefined) throw new Error("Couldn't find a Name column. Put the worker's name in a column headed “Name”.");
+  const data=table.slice(1).filter(r=>String(r[map.name]||"").trim());
+  const dateCols=IMP_DATES.filter(k=>map[k]!==undefined).map(k=>map[k]);
+  const order=detectDateOrder(data,dateCols);
+  const ignored=table[0].filter((h,i)=>!Object.values(map).includes(i)&&String(h).trim()).map(h=>String(h).trim());
+  const existing=allWorkers();
+  const rows=data.map(r=>{ const rec={}, warn=[];
+    for(const [k,i] of Object.entries(map)){ let v=String(r[i]??"").trim(); if(!v) continue;
+      if(IMP_DATES.includes(k)){ const iso=toIsoDate(v,order); if(iso===null){ warn.push(`couldn't read ${k==="permitExpiry"?"expiry":k==="permitIssue"?"issue":k==="permitRenewal"?"renewal":k} date “${v}”`); continue; } v=iso; }
+      else if(k==="levy"||k==="rate"){ const n=parseFloat(v.replace(/[^0-9.\-]/g,"")); if(isNaN(n)) continue; v=n; }
+      else if(k==="levyTier") v=v.toUpperCase();
+      rec[k]=v; }
+    if(rec.permitNo && /[^0-9A-Z\s]/i.test(rec.permitNo)) warn.push(`work permit no. “${rec.permitNo}” has an unusual character`);
+    const match = (rec.permitNo && existing.find(w=>w.permitNo && normPermit(w.permitNo)===normPermit(rec.permitNo))) || (rec.empId && existing.find(w=>w.empId && String(w.empId).trim().toUpperCase()===String(rec.empId).toUpperCase())) || null;
+    return {rec, warn, match:match?match.id:null}; });
+  const placeholders=existing.filter(w=>/^(Worker \d+|New worker)$/.test(String(w.name||"")) && !w.permitNo && !w.empId);
+  return {rows, order, ignored, mapped:Object.keys(map), placeholders};
+}
+const IMP_LABELS={name:"Name",empId:"Worker ID",permitNo:"Work permit no.",idNo:"FIN no.",nationality:"Nationality",dob:"Date of birth",permitIssue:"Permit issue",permitRenewal:"Permit renewal",permitExpiry:"Permit expiry",joined:"Date joined",levy:"Levy rate",levyTier:"R1/R2",phone:"Phone",rate:"Base rate",emergency:"Emergency contact",bank:"Bank",notes:"Notes"};
+function showImport(res,fileName){
+  IMP.rows=res; IMP.file=fileName;
+  const nNew=res.rows.filter(r=>!r.match).length, nUpd=res.rows.length-nNew, nWarn=res.rows.filter(r=>r.warn.length).length;
+  const cols=res.mapped.filter(k=>k!=="name");
+  const body=res.rows.map(r=>`<tr${r.warn.length?' style="background:var(--warn-soft)"':""}><td>${r.match?'<span class="chip info">Update</span>':'<span class="chip ok">New</span>'}</td><td><strong>${esc(r.rec.name)}</strong>${r.warn.length?`<span class="wtrade" style="color:var(--warn);display:block">${esc(r.warn.join("; "))}</span>`:""}</td>${cols.map(k=>`<td class="mono" style="white-space:nowrap">${esc(IMP_DATES.includes(k)?isoToDmy(r.rec[k]||""):r.rec[k]??"")}</td>`).join("")}</tr>`).join("");
+  const ph=res.placeholders.length;
+  $("#impBody").innerHTML=`
+    <header><div><h3>Import workers</h3><div class="meta">${esc(fileName)} · ${res.rows.length} worker${res.rows.length===1?"":"s"}</div></div></header>
+    <div class="quick"><span class="chip ok">${nNew} new</span>${nUpd?`<span class="chip info">${nUpd} update existing (matched by work permit no. or worker ID)</span>`:""}${nWarn?`<span class="chip warn">${nWarn} to check</span>`:""}</div>
+    <p class="meta" style="margin:0">Dates read as <strong>${res.order==="mdy"?"month/day/year":"day/month/year"}</strong> and shown below as DD/MM/YYYY.${res.ignored.length?` Columns not imported: ${esc(res.ignored.join(", "))}.`:""} Fields not in the file are left as they are.</p>
+    ${ph?`<label class="check" style="display:flex;gap:8px;align-items:flex-start;font-size:13px"><input type="checkbox" id="impDropPh"${IMP.dropPlaceholders?" checked":""}> <span>Remove the ${ph} placeholder worker${ph>1?"s":""} (${esc(res.placeholders.slice(0,3).map(w=>w.name).join(", "))}${ph>3?"…":""}) created by the quick setup. Any roster days they have are kept in past months.</span></label>`:""}
+    <div class="scroll" style="max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:var(--r)"><table><thead><tr><th></th><th>Name</th>${cols.map(k=>`<th>${esc(IMP_LABELS[k]||k)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="actions"><button class="btn" id="impCancel">Cancel</button><button class="btn primary" id="impGo">Import ${res.rows.length} worker${res.rows.length===1?"":"s"}</button></div>`;
+  const d=$("#impDlg"); if(d.showModal) d.showModal(); else d.setAttribute("open","");
+}
+async function runImport(){
+  const res=IMP.rows; if(!res) return; const drop=IMP.dropPlaceholders;
+  let added=0, updated=0;
+  if(drop) for(const w of res.placeholders){ delete S.workers[w.id]; deleteDoc("workers",w.id); }
+  for(const r of res.rows){
+    if(r.match && S.workers[r.match]){ S.workers[r.match]={...S.workers[r.match],...r.rec}; saveDoc("workers",r.match,r.rec,true); updated++; }
+    else { const id="w"+Date.now().toString(36)+(added+updated).toString(36); S.workers[id]={rate:0,siteId:"",active:true,order:nextOrder(S.workers),...r.rec}; saveDoc("workers",id,S.workers[id],false); added++; }
+  }
+  IMP.rows=null; const d=$("#impDlg"); d.close?d.close():d.removeAttribute("open");
+  PR.wid=""; render();
+  toast(`Imported: ${added} added${updated?`, ${updated} updated`:""}${drop&&res.placeholders.length?`, ${res.placeholders.length} placeholders removed`:""}.${added?" Set each worker's base rate in their profile.":""}`);
+}
+async function readImportFile(file){
+  try{
+    let table;
+    if(/\.(xlsx|xls)$/i.test(file.name)){ const X=await loadXlsxLib(); const wb=X.read(await file.arrayBuffer(),{type:"array"}); const ws=wb.Sheets[wb.SheetNames[0]]; table=X.utils.sheet_to_json(ws,{header:1,raw:false,defval:""}); }
+    else table=parseCSV(await file.text());
+    showImport(buildImport(table), file.name);
+  }catch(e){ toast(e.message||"Couldn't read that file."); }
+}
+
 function renderProfiles(){
   const v=$("#view-profiles"); const ws=allWorkers();
   if(!ws.length){ v.innerHTML=emptySetup(); return; }
@@ -1170,7 +1275,7 @@ function renderProfiles(){
   const ps=permitState(w);
   const f=(k,label,type,extra)=> type==="date" ? dateField(w,k,label,dis) : `<label for="pf-${k}">${label}<input type="${type||"text"}" id="pf-${k}" data-wid="${id}" data-k="${k}" value="${esc(w[k]??"")}"${extra||""}${dis}></label>`;
   v.innerHTML=`<div class="profiles">
-    <aside class="panel plist-wrap"><div class="panel-head"><h2>Workers</h2>${ed?'<button class="btn" id="addWP">Add</button>':""}</div>
+    <aside class="panel plist-wrap"><div class="panel-head"><h2>Workers</h2>${ed?'<button class="btn" id="addWP">Add</button><label class="btn" for="impFile" style="display:inline-flex;align-items:center">Import<input type="file" id="impFile" accept=".csv,.xlsx,.xls,text/csv" hidden></label>':""}</div>
       <div style="padding:10px 12px 0"><input type="search" id="prSearch" placeholder="Search name or ID" value="${esc(PR.q)}" aria-label="Search workers" style="width:100%"></div>
       ${expiring?`<p class="wtrade" style="margin:8px 12px 0"><span class="chip warn">${expiring} permit${expiring>1?"s":""} expiring or expired</span></p>`:""}
       <div class="plist-items">${list||'<p class="wtrade" style="padding:12px">No match.</p>'}</div></aside>
@@ -1186,7 +1291,9 @@ function renderProfiles(){
             ${f("empId","Worker ID",null,' placeholder="e.g. HSS 001"')}${f("name","Full name")}${f("dob","Date of birth","date",' max="'+new Date().toISOString().slice(0,10)+'"')}
             <label for="pf-rate">Base rate per hour<input type="number" min="0" step="0.5" id="pf-rate" data-wid="${id}" data-k="rate" value="${w.rate??""}"${IS_ENTRY?" disabled title=\"Set by the manager\"":dis}></label>
             ${f("phone","Phone","tel")}${f("nationality","Nationality")}
-            ${f("idNo","FIN no.")}${f("permitNo","Work permit no.")}${f("permitExpiry","Work permit expiry","date")}
+            ${f("idNo","FIN no.")}${f("permitNo","Work permit no.")}${f("permitIssue","Work permit issue","date")}${f("permitRenewal","Work permit renewal","date")}${f("permitExpiry","Work permit expiry","date")}
+            <label for="pf-levy">Levy rate (S$/month)<input type="number" min="0" step="10" id="pf-levy" data-wid="${id}" data-k="levy" value="${w.levy??""}"${dis}></label>
+            <label for="pf-levyTier">R1/R2 indicator<select id="pf-levyTier" data-wid="${id}" data-k="levyTier"${dis}><option value=""${!w.levyTier?" selected":""}>—</option><option value="R1"${w.levyTier==="R1"?" selected":""}>R1 (higher-skilled)</option><option value="R2"${w.levyTier==="R2"?" selected":""}>R2 (basic-skilled)</option></select></label>
             ${f("joined","Date joined","date")}${openAccess()?"":f("bank","Bank account / PayNow")}
             ${f("emergency","Emergency contact")}
             <label class="check" for="pf-active" style="align-self:center"><input type="checkbox" id="pf-active" data-wid="${id}" data-k="active"${w.active!==false?" checked":""}${dis}> <span>Active (shows on the roster)</span></label>
@@ -1311,6 +1418,8 @@ document.addEventListener("click", e=>{
     const patch = done ? {status:"ongoing",completedOn:null} : {status:"completed",completedOn:iso};
     S.sites[id]={...S.sites[id],...patch}; if(done){ delete S.sites[id].completedOn; } saveDoc("sites",id,patch,true);
     toast(done?`${siteName(id)} reopened. It's back in the roster.`:`${siteName(id)} marked completed. It no longer appears when assigning sites; its history stays in payroll and reports.`); render(); return; }
+  if(b.id==="impCancel"){ IMP.rows=null; const d=$("#impDlg"); d.close?d.close():d.removeAttribute("open"); return; }
+  if(b.id==="impGo"){ b.disabled=true; b.textContent="Importing…"; runImport(); return; }
   if(b.dataset.pick){ const pk=document.getElementById("pk-"+b.dataset.pick); if(pk){ try{ pk.showPicker(); }catch(_){ pk.focus(); pk.click(); } } return; }
   if(b.dataset.profile){ openProfile(b.dataset.profile); return; }
   if(b.id==="addWP"){ const id=nextId("w",S.workers); S.workers[id]={name:"New worker",trade:"",rate:0,siteId:"",active:true,order:nextOrder(S.workers)}; saveDoc("workers",id,S.workers[id],false); openProfile(id); const el=document.getElementById("pf-name"); if(el){el.focus();el.select()} return; }
@@ -1372,6 +1481,8 @@ document.addEventListener("change", e=>{
     if(len<1) len=1; if(len>mx) len=mx; const got=setRun(wid,d,len);
     const ri=runInfo(wid,d); toast(`${S.workers[wid].name}: ${siteName(dayRec(wid,d).s)} for ${got} day${got>1?"s":""}, until ${shortDay(S.monthKey,ri.last)}.`);
     render(); return; }
+  if(t.id==="impFile"&&t.files&&t.files[0]){ readImportFile(t.files[0]); t.value=""; return; }
+  if(t.id==="impDropPh"){ IMP.dropPlaceholders=t.checked; return; }
   if(t.dataset.date&&t.dataset.dwid){ const iso=dmyToIso(t.value); if(iso===null){ t.classList.add("bad"); toast("Type the date as DD/MM/YYYY, for example 15/03/1990."); return; } saveDate(t.dataset.dwid,t.dataset.date,iso,t); return; }
   if(t.dataset.pk&&t.dataset.pkwid){ const inp=document.getElementById("pf-"+t.dataset.pk); if(inp) saveDate(t.dataset.pkwid,t.dataset.pk,t.value||"",inp); return; }
   if(t.dataset.rw&&t.dataset.rs){ const wid=t.dataset.rw, sid=t.dataset.rs; const raw=t.value.trim(); const val= raw===""?null:Math.max(0,num(raw));
@@ -1379,7 +1490,7 @@ document.addEventListener("change", e=>{
     S.workers[wid]={...S.workers[wid],siteRates:sr}; saveDoc("workers",wid,{siteRates:{[sid]:val}},true);
     t.style.background= val===null?"":"var(--accent-soft)"; t.style.borderColor= val===null?"":"var(--accent)";
     toast(val===null?`${S.workers[wid].name} at ${siteName(sid)}: back to the default rate.`:`${S.workers[wid].name} at ${siteName(sid)}: ${cur()} ${val.toFixed(2)}/hr.`); return; }
-  if(t.dataset.wid&&t.dataset.k){ const id=t.dataset.wid,k=t.dataset.k; let val=t.type==="checkbox"?t.checked:k==="rate"?num(t.value):t.value.trim();
+  if(t.dataset.wid&&t.dataset.k){ const id=t.dataset.wid,k=t.dataset.k; let val=t.type==="checkbox"?t.checked:(k==="rate"||k==="levy")?(t.value.trim()===""&&k==="levy"?"":num(t.value)):t.value.trim();
     if(k==="name"&&!val){val="Unnamed worker";t.value=val}
     S.workers[id]={...S.workers[id],[k]:val}; saveDoc("workers",id,{[k]:val},true); if(k==="active") render(); return; }
   if(t.dataset.sid&&t.dataset.k){ const id=t.dataset.sid,k=t.dataset.k; let val=k==="payValue"?num(t.value):t.value.trim(); if(k==="name"&&!val){val="Unnamed site";t.value=val}
