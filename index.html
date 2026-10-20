@@ -14,6 +14,7 @@ window.SUPABASE_CONFIG = {
 };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<meta name="app-version" content="20261020062548">
 <title>Hong Soon Seng Payroll</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23e0a100%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Arial%27 font-weight=%27700%27 font-size=%2716%27 text-anchor=%27middle%27 fill=%27%232a2000%27%3ESP%3C/text%3E%3C/svg%3E">
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -1545,6 +1546,25 @@ document.addEventListener("keydown", e=>{ const t=e.target; if(e.key!=="Enter"||
   if(!t.dataset.f) return; e.preventDefault();
   const col=[...document.querySelectorAll(`#view-roster input[data-f="${t.dataset.f}"]`)]; const i=col.indexOf(t); const nx=col[e.shiftKey?i-1:i+1]; if(nx){nx.focus();nx.select()} });
 window.addEventListener("pagehide", flushMonth);
+
+/* ---------- auto-update: every 2 minutes, load a newer version of the page when idle ---------- */
+(function(){
+  if(window.claude || !/^https?:/.test(location.protocol)) return;
+  const meta=document.querySelector('meta[name="app-version"]'); const mine=meta?meta.content:"";
+  let newer=false;
+  const idle=()=>{ const a=document.activeElement; const typing=a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)&&a.type!=="checkbox"&&a.type!=="search";
+    const dlg=[...document.querySelectorAll("dialog")].some(d=>d.open);
+    return !typing && !dlg && pending===0 && !Object.keys(S.dirty||{}).length; };
+  async function check(){
+    try{
+      if(!newer){ const r=await fetch(location.pathname+"?v="+Date.now(),{cache:"no-store"}); if(!r.ok) return;
+        const m=/<meta name="app-version" content="([^"]*)"/.exec(await r.text()); if(m && m[1] && m[1]!==mine) newer=true; }
+      if(newer && idle()){ toast("Loading the latest version…"); setTimeout(()=>location.reload(),800); }
+    }catch(e){}
+  }
+  setInterval(check, 120000);
+  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") check(); });
+})();
 
 start();
 })();
