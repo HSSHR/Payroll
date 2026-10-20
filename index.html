@@ -234,11 +234,10 @@ dialog::backdrop{background:rgba(10,12,10,.45)}
     <nav class="tabs" role="tablist">
       <button role="tab" aria-selected="true" data-tab="roster" id="tab-roster">Daily roster</button>
       <button role="tab" aria-selected="false" data-tab="grid" id="tab-grid">Month overview</button>
-      <button role="tab" aria-selected="false" data-tab="payroll" id="tab-payroll">Monthly payroll</button>
+      <button role="tab" aria-selected="false" data-tab="payroll" id="tab-payroll">Payroll</button>
       <button role="tab" aria-selected="false" data-tab="sites" id="tab-sites">Cost by site</button>
-      <button role="tab" aria-selected="false" data-tab="profiles" id="tab-profiles">Profiles</button>
-      <button role="tab" aria-selected="false" data-tab="team" id="tab-team">Workers &amp; sites</button>
-      <button role="tab" aria-selected="false" data-tab="export" id="tab-export">Export</button>
+      <button role="tab" aria-selected="false" data-tab="profiles" id="tab-profiles">Workers Profile</button>
+      <button role="tab" aria-selected="false" data-tab="team" id="tab-team">Project/Sites</button>
       <button role="tab" aria-selected="false" data-tab="settings" id="tab-settings">Pay rules</button>
     </nav>
   </div>
@@ -253,7 +252,6 @@ dialog::backdrop{background:rgba(10,12,10,.45)}
   <section id="view-sites" hidden></section>
   <section id="view-profiles" hidden></section>
   <section id="view-team" hidden></section>
-  <section id="view-export" hidden></section>
   <section id="view-settings" hidden></section>
 </main>
 
@@ -266,7 +264,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-const TABS = ["roster","grid","payroll","sites","profiles","team","export","settings"];
+const TABS = ["roster","grid","payroll","sites","profiles","team","settings"];
 const OFF = "off";
 const DUE_HOUR = 18;
 const DEFAULT_SETTINGS = {company:"Site Payroll Board", currency:"S$", ot15:1.5, ot20:2.0, otLimit:72, dayHours:8, autoFill:true, skipSun:true, sample:false};
@@ -638,7 +636,7 @@ function render(){
   TABS.forEach(t=>{$("#view-"+t).hidden = t!==S.tab});
   renderDue();
   let notice="";
-  if(isReady() && S.settings.sample) notice=`<div class="notice"><p><strong>Sample roster loaded.</strong> The 22 workers, 15 sites, site pay rules and October hours are examples. Replace them in <em>Workers &amp; sites</em>.</p>${S.canWrite?'<button class="btn" id="dismissSample">Hide this notice</button>':''}</div>`;
+  if(isReady() && S.settings.sample) notice=`<div class="notice"><p><strong>Sample roster loaded.</strong> The 22 workers, 15 sites, site pay rules and October hours are examples. Replace them in <em>Project/Sites</em>.</p>${S.canWrite?'<button class="btn" id="dismissSample">Hide this notice</button>':''}</div>`;
   else if(S.mode==="local" && isReady() && !S.settings.localNoticeHidden) notice=`<div class="notice"><p><strong>Saved in this browser.</strong> Your roster is stored on this device and browser only. Download a backup regularly from <em>Pay rules</em>. To share one roster between managers, connect Supabase (see the README).</p><button class="btn" id="hideLocalNotice">Got it</button></div>`;
   else if(S.mode==="memory" && isReady()) notice=`<div class="notice"><p><strong>Preview.</strong> Placeholder workers and sites are shown so you can see the layout. Changes here are not saved.</p></div>`;
   else if(S.live && !S.canWrite) notice=`<div class="notice"><p>You can view this payroll. Ask the owner for Contributor access to make changes.</p></div>`;
@@ -646,7 +644,7 @@ function render(){
   $("#noticeBox").innerHTML=notice;
   if(!isReady()){ $("#view-"+S.tab).innerHTML=`<div class="panel"><div class="empty"><h3>Loading payroll…</h3><p>Fetching workers, sites and the ${esc(labelOf(S.monthKey))} roster.</p></div></div>`; return; }
   const f=captureFocus();
-  ({roster:renderRoster,grid:renderGrid,payroll:renderPayroll,sites:renderSites,profiles:renderProfiles,team:renderTeam,export:renderExport,settings:renderSettings})[S.tab]();
+  ({roster:renderRoster,grid:renderGrid,payroll:renderPayroll,sites:renderSites,profiles:renderProfiles,team:renderTeam,settings:renderSettings})[S.tab]();
   restoreFocus(f);
 }
 function captureFocus(){ const a=document.activeElement; if(!a||!a.id||a===document.body) return null; return {id:a.id,val:a.value,s:a.selectionStart,e:a.selectionEnd,typing:a.tagName==="INPUT"}; }
@@ -655,7 +653,7 @@ function siteOptions(sel,opts){ opts=opts||{}; let h=`<option value=""${!sel?" s
   if(opts.off!==false) h+=`<option value="${OFF}"${sel===OFF?" selected":""}>Off / rest day</option>`;
   for(const s of siteList()) h+=`<option value="${esc(s.id)}"${s.id===sel?" selected":""}>${esc(s.name)}</option>`; return h; }
 function emptySetup(){ return `<div class="panel"><div class="empty"><h3>No workers or sites yet</h3><p>Set up your crew and project sites to start the daily roster. You can rename everyone afterwards.</p>
-  ${S.canWrite?'<button class="btn primary" id="quickSetup">Create 22 workers and 15 sites</button><button class="linkbtn" data-go="team">Or add them one by one</button>':''}${S.mode==="local"?'<button class="linkbtn" data-go="settings">Restore from a backup file</button>':''}</div></div>`; }
+  ${S.canWrite?'<button class="btn primary" id="quickSetup">Create 22 workers and 15 sites</button><button class="linkbtn" data-go="profiles">Or add workers one by one</button>':''}${S.mode==="local"?'<button class="linkbtn" data-go="settings">Restore from a backup file</button>':''}</div></div>`; }
 function siteFilterOptions(val){ return `<option value="all"${val==="all"?" selected":""}>All workers</option><option value="none"${val==="none"?" selected":""}>Not assigned yet</option><option value="${OFF}"${val===OFF?" selected":""}>Off</option>`+siteList().map(s=>`<option value="${esc(s.id)}"${val===s.id?" selected":""}>${esc(s.name)}</option>`).join(""); }
 
 /* ---------- daily roster ---------- */
@@ -772,13 +770,71 @@ function renderGrid(){
       <label class="field" for="hlSite">Highlight <select id="hlSite"><option value="">All sites</option>${siteList().map(s=>`<option value="${esc(s.id)}"${hl===s.id?" selected":""}>${esc(siteCode(s.id))} · ${esc(s.name)}</option>`).join("")}</select></label></div>
     <div class="legend" style="padding-top:10px"><span><i style="background:var(--info-soft);outline:1px solid var(--info)"></i>On site</span><span><i style="background:var(--accent-soft);outline:1px solid var(--accent)"></i>Rest day / PH hours</span><span><i style="background:var(--warn-soft);outline:1px solid var(--warn)"></i>Hours but no site</span></div>
     <div class="scroll"><table class="mgrid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody><tfoot><tr>${foot}</tr></tfoot></table></div></div>
-    <div class="panel"><div class="panel-head"><h2>Site codes</h2><p>Set a short code for each site in Workers &amp; sites.</p></div>
+    <div class="panel"><div class="panel-head"><h2>Site codes</h2><p>Set a short code for each site in Project/Sites.</p></div>
     <div class="deploy">${siteList().map(s=>`<span class="chip plain"><b>${esc(siteCode(s.id))}</b> ${esc(s.name)}</span>`).join("")}</div></div>`;
 }
 
 /* ---------- monthly payroll ---------- */
+const PY = {period:"month", year:0, site:"all", res:null, resKey:"", loading:false};
+function pyKey(){ return PY.period+"|"+(PY.period==="year"?PY.year:S.monthKey)+"|"+PY.site; }
+function pySetEx(){ EX.period=PY.period; EX.month=S.monthKey; EX.year=PY.year; EX.site=PY.site; }
+function payrollControls(){
+  if(!PY.year) PY.year=ym(S.monthKey)[0];
+  const y0=new Date().getFullYear(); const years=[y0+1,y0,y0-1,y0-2]; if(!years.includes(PY.year)) years.push(PY.year);
+  const months=(()=>{ const o=[]; const now=new Date(); for(let i=-12;i<=2;i++) o.push(keyOf(new Date(now.getFullYear(),now.getMonth()+i,1))); if(!o.includes(S.monthKey)) o.push(S.monthKey); return o.sort().reverse(); })();
+  return `<div class="panel"><div class="panel-head"><div class="toolbar">
+    <label class="field" for="pyPeriod">View <select id="pyPeriod"><option value="month"${PY.period==="month"?" selected":""}>Monthly</option><option value="year"${PY.period==="year"?" selected":""}>Yearly</option></select></label>
+    ${PY.period==="month"?`<label class="field" for="pyMonth">Month <select id="pyMonth">${months.map(k=>`<option value="${k}"${k===S.monthKey?" selected":""}>${esc(labelOf(k))}</option>`).join("")}</select></label>`
+      :`<label class="field" for="pyYear">Year <select id="pyYear">${years.sort((a,b)=>b-a).map(y=>`<option value="${y}"${y===PY.year?" selected":""}>${y}</option>`).join("")}</select></label>`}
+    <label class="field" for="pySite">Site <select id="pySite"><option value="all"${PY.site==="all"?" selected":""}>All sites</option>${siteList().map(x=>`<option value="${esc(x.id)}"${PY.site===x.id?" selected":""}>${esc(x.name)}</option>`).join("")}</select></label>
+    <span class="grow"></span>
+    <span class="field">Export ${PY.period==="year"?esc(String(PY.year)):esc(labelOf(S.monthKey))} (CSV):</span>
+    <button class="btn primary" data-dl="worker">Payroll</button><button class="btn" data-dl="site">Cost by site</button><button class="btn" data-dl="daily">Daily log</button>
+  </div></div></div>`;
+}
+async function pyEnsure(){
+  pySetEx(); const k=pyKey();
+  if(PY.period==="month"){ PY.res=exCompute({[S.monthKey]:S.month}); PY.resKey=k; return PY.res; }
+  if(PY.resKey===k && PY.res) return PY.res;
+  const months=await exLoad(); pySetEx(); PY.res=exCompute(months); PY.resKey=k; return PY.res;
+}
+async function pyDownload(report){
+  try{ await pyEnsure(); pySetEx(); EX.report=report; EX.result=PY.res; saveCsv(exFilename(), exCsv()); }
+  catch(e){ toast("Couldn't load that period. Check your connection and try again."); }
+}
 function renderPayroll(){
-  const v=$("#view-payroll"); const list=workerList(); if(!list.length||!siteList().length){ v.innerHTML=emptySetup(); return; }
+  const v=$("#view-payroll"); if(!workerList().length||!siteList().length){ v.innerHTML=emptySetup(); return; }
+  if(PY.period==="month" && PY.site==="all"){ renderPayrollMonth(); return; }
+  const k=pyKey(), siteLbl=PY.site==="all"?"All sites":siteName(PY.site)||"Selected site", label=PY.period==="year"?String(PY.year):labelOf(S.monthKey);
+  if(PY.resKey!==k && !PY.loading){ PY.loading=true; PY.res=null; pyEnsure().catch(()=>{ PY.res=null; PY.resKey=k; PY.err=true; }).finally(()=>{ PY.loading=false; if(S.tab==="payroll") renderPayroll(); }); }
+  const res = PY.resKey===k ? PY.res : null;
+  let content;
+  if(!res){ content=`<div class="panel"><div class="empty"><p>${PY.err&&PY.resKey===k?"Couldn't load that period. Check your connection and try again.":"Loading "+esc(label)+"…"}</p></div></div>`; }
+  else {
+    pySetEx(); EX.report="worker"; const tb=exTable(res), T=res.T;
+    const cellHtml=(c,i)=> tb.money.has(i)?fmt(c): typeof c==="number"? hrs(c) : esc(c);
+    const body=tb.body.map((r,ri)=>`<tr>${r.map((c,i)=>`<td class="${tb.numCols.has(i)?"num mono":""}">${i===0?`<button class="linkname" data-profile="${esc(res.W[ri].w.id)}">${esc(c)}</button>`:cellHtml(c,i)}</td>`).join("")}</tr>`).join("");
+    let monthsTbl="";
+    if(PY.period==="year"){ const bm={}; res.SC.forEach(b=>{ const m=bm[b.key]||(bm[b.key]={crew:new Set(),manDays:0,hours:0,ot:0,gross:0}); b.crew.forEach(x=>m.crew.add(x)); m.manDays+=b.manDays; m.hours+=b.hours; m.ot+=b.ot; m.gross+=b.gross; });
+      const max=Math.max(1,...Object.values(bm).map(m=>m.gross));
+      monthsTbl=`<div class="panel"><div class="panel-head"><h2>Month by month</h2><p>${esc(siteLbl)} · ${PY.year}</p></div>
+        <div class="bars">${Array.from({length:12},(_,i)=>{ const key=PY.year+"-"+String(i+1).padStart(2,"0"), m=bm[key]; return `<div class="bar-row"><span class="lbl">${esc(MONTHS[i])}</span><div class="bar-track" role="img" aria-label="${esc(MONTHS[i])}: ${fmt(m?m.gross:0)}"><span class="bar-n" style="width:${m?(m.gross/max*100).toFixed(2):0}%"></span></div><span class="amt">${m?fmt0(m.gross):"—"}</span></div>`; }).join("")}</div>
+        <div class="scroll"><table><thead><tr><th>Month</th><th class="num">Workers</th><th class="num">Man-days</th><th class="num">Hours</th><th class="num">OT hrs</th><th class="num">Gross</th></tr></thead><tbody>${Object.keys(bm).sort().map(key=>{ const m=bm[key]; return `<tr><td>${esc(labelOf(key))}</td><td class="num mono">${m.crew.size}</td><td class="num mono">${m.manDays}</td><td class="num mono">${hrs(m.hours)}</td><td class="num mono">${hrs(m.ot)}</td><td class="num net">${fmt(m.gross)}</td></tr>`; }).join("")||'<tr><td colspan="6"><div class="empty"><p>No hours recorded this year.</p></div></td></tr>'}</tbody></table></div></div>`; }
+    content=`<div class="kpis">
+      <div class="kpi lead"><span class="k">${PY.site==="all"?"Net pay":"Labour cost"}</span><span class="v">${fmt0(PY.site==="all"?T.net:T.gross)}</span><span class="s">${esc(siteLbl)} · ${esc(label)}</span></div>
+      <div class="kpi"><span class="k">Gross pay</span><span class="v">${fmt0(T.gross)}</span><span class="s">${PY.site==="all"?"adjustments "+fmt(T.adj):"adjustments aren't split by site"}</span></div>
+      <div class="kpi"><span class="k">Man-days</span><span class="v">${T.manDays.toLocaleString("en-SG")}</span><span class="s">${T.people.size} workers</span></div>
+      <div class="kpi"><span class="k">Hours</span><span class="v">${hrs(T.hours)}</span><span class="s">${hrs(T.ot)} OT / RD / PH</span></div>
+      ${PY.period==="year"?`<div class="kpi"><span class="k">Months with data</span><span class="v">${T.months}<small> / 12</small></span></div>`:""}
+    </div>
+    ${monthsTbl}
+    <div class="panel"><div class="panel-head"><h2>${PY.period==="year"?"Yearly payroll by worker":"Payroll by worker"}</h2><p>${esc(siteLbl)} · ${esc(label)}${PY.site!=="all"?". Only days worked at this site are counted.":""} Adjustments and payslips are on the Monthly view with All sites.</p></div>
+      ${tb.body.length?`<div class="scroll"><table><thead><tr>${tb.head.map((h,i)=>`<th class="${tb.numCols.has(i)?"num":""}">${esc(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`:`<div class="empty"><p>No hours recorded for ${esc(siteLbl)} in ${esc(label)}.</p></div>`}</div>`;
+  }
+  v.innerHTML=`<div style="display:grid;gap:18px">${payrollControls()}${content}</div>`;
+}
+function renderPayrollMonth(){
+  const v=$("#view-payroll"); const list=workerList();
   const t=totals(list), lim=num(S.settings.otLimit), N=daysIn(S.monthKey), de=daysEntered();
   const ed=editable(), dis=ed?"":" disabled";
   const q=S.search.trim().toLowerCase();
@@ -794,6 +850,7 @@ function renderPayroll(){
       <td class="num"><input type="number" step="1" inputmode="decimal" id="adj-${id}" data-adj="${id}" value="${m.adj||""}" placeholder="0" aria-label="Adjustment for ${esc(w.name)}"${dis}></td>
       <td class="num net" id="net-${id}">${fmt(m.net)}</td><td>${status}</td><td><button class="linkbtn" data-slip="${id}">Payslip</button></td></tr>`; }
   v.innerHTML=`<div style="display:grid;gap:18px">
+  ${payrollControls()}
   <div class="kpis">
     <div class="kpi lead"><span class="k">Net payroll</span><span class="v" id="k-net">${fmt0(t.net)}</span><span class="s">${esc(labelOf(S.monthKey))} · ${t.paid} of ${list.length} paid</span></div>
     <div class="kpi"><span class="k">Days entered</span><span class="v">${de}<small> / ${N}</small></span><span class="s">days with any hours</span></div>
@@ -803,8 +860,7 @@ function renderPayroll(){
     <div class="kpi"><span class="k">Need attention</span><span class="v">${t.overOT+t.noSite}</span><span class="s">${t.overOT?`<span class="chip warn">${t.overOT} over ${lim} OT hrs</span> `:""}${t.noSite?`<span class="chip warn">${t.noSite} with unassigned days</span>`:""}${!t.overOT&&!t.noSite?"All clear":""}</span></div>
   </div>
   <div class="panel"><div class="panel-head"><h2>Monthly payroll</h2><p>Each day is paid at that site's rate: rate × (normal + OT × ${S.settings.ot15} + RD/PH × ${S.settings.ot20}), then the adjustment is added. Open a payslip to see the rate used at each site.</p></div>
-    <div class="panel-head"><div class="toolbar"><input type="search" id="fSearch" placeholder="Search worker or trade" value="${esc(S.search)}" aria-label="Search workers"><span class="grow"></span>
-      <button class="btn" id="csvDaily">Download daily log</button><button class="btn primary" id="csvBtn">Download payroll CSV</button></div></div>
+    <div class="panel-head"><div class="toolbar"><input type="search" id="fSearch" placeholder="Search worker or trade" value="${esc(S.search)}" aria-label="Search workers"></div></div>
     <div class="scroll"><table><thead><tr><th>Worker</th><th class="num">Days</th><th class="num">Sites</th><th class="num">Base/hr</th><th class="num">Normal</th><th class="num">OT ${S.settings.ot15}×</th><th class="num">RD/PH ${S.settings.ot20}×</th><th class="num">Gross</th><th class="num">Adjust ±</th><th class="num">Net pay</th><th>Status</th><th></th></tr></thead>
     <tbody>${body||'<tr><td colspan="12"><div class="empty"><p>No workers match.</p></div></td></tr>'}</tbody>
     <tfoot><tr><td>Total · ${rows.length} workers</td><td class="num mono">${ft.d}</td><td></td><td></td><td class="num mono">${hrs(ft.n)}</td><td class="num mono">${hrs(ft.o)}</td><td class="num mono">${hrs(ft.h)}</td><td class="num mono">${fmt(ft.gross)}</td><td class="num mono" id="ft-adj">${fmt(ft.adj)}</td><td class="num net" id="ft-net">${fmt(ft.net)}</td><td colspan="2"></td></tr></tfoot></table></div></div></div>`;
@@ -864,8 +920,6 @@ function renderTeam(){
   v.innerHTML=`<div style="display:grid;gap:18px">
     <div class="panel"><div class="panel-head"><h2>Sites (${ss.length})</h2><p>The default pay at each site, used when a worker has no custom rate for it. "Base + extra" adds an allowance to each worker's base rate. "Fixed site rate" sets one hourly rate.</p>${ed?'<button class="btn primary" id="addS">Add site</button>':""}</div>
       <div class="scroll"><table><thead><tr><th>Site name</th><th>Short code</th><th>Pay at this site</th><th></th></tr></thead><tbody>${srows||'<tr><td colspan="4"><div class="empty"><p>No sites yet.</p></div></td></tr>'}</tbody></table></div></div>
-    <div class="panel"><div class="panel-head"><h2>Workers (${ws.length})</h2><p>Base rate is per hour and is used wherever a site pays the worker's own rate. "Usual site" is used by <em>Fill blanks with usual site</em>.</p>${ed?'<button class="btn primary" id="addW">Add worker</button>':""}</div>
-      <div class="scroll"><table><thead><tr><th>Name</th><th>Trade</th><th class="num">Base/hr</th><th>Usual site</th><th>Status</th><th></th></tr></thead><tbody>${wrows||'<tr><td colspan="6"><div class="empty"><p>No workers yet.</p></div></td></tr>'}</tbody></table></div></div>
     ${rateMatrix(ws,ss,dis)}</div>`;
 }
 function rateMatrix(ws,ss,dis){
@@ -881,7 +935,7 @@ function rateMatrix(ws,ss,dis){
 }
 function renderSettings(){
   const v=$("#view-settings"), st=S.settings, dis=S.canWrite?"":" disabled";
-  v.innerHTML=`<div class="panel"><div class="panel-head"><h2>Pay rules</h2><p>These apply to every worker. Site pay rules are set per site in Workers &amp; sites. Finalised months keep their locked rates.</p></div>
+  v.innerHTML=`<div class="panel"><div class="panel-head"><h2>Pay rules</h2><p>These apply to every worker. Site pay rules are set per site in Project/Sites. Finalised months keep their locked rates.</p></div>
   <div class="settings">
     <label for="stCur">Currency label<input type="text" id="stCur" data-st="currency" value="${esc(st.currency)}"${dis}></label>
     <label for="stDay">Normal hours per day<input type="number" step="0.5" min="1" max="12" id="stDay" data-st="dayHours" value="${st.dayHours}"${dis}><span class="hint">Filled in automatically when you pick a site for an empty day.</span></label>
@@ -941,7 +995,7 @@ function exCompute(months){
           a.days++; a.n+=r.n; a.o+=r.o; a.h+=r.h; a.normalPay+=np; a.otPay+=op; a.gross+=pay; if(sid) a.sites.add(sid);
           const sk=sid+"|"+key; const b=SC[sk]||(SC[sk]={sid,key,crew:new Set(),manDays:0,hours:0,ot:0,normalPay:0,otPay:0,gross:0});
           b.crew.add(w.id); b.manDays++; b.hours+=h; b.ot+=r.o+r.h; b.normalPay+=np; b.otPay+=op; b.gross+=pay;
-          if(EX.report==="daily") rows.push({date:`${key}-${String(d).padStart(2,"0")}`, day:WD[wdOf(key,d)], worker:w.name, trade:w.trade||"", site:sid?siteName(sid):"No site", rate:rt, n:r.n, o:r.o, h:r.h, pay});
+          rows.push({date:`${key}-${String(d).padStart(2,"0")}`, day:WD[wdOf(key,d)], worker:w.name, trade:w.trade||"", site:sid?siteName(sid):"No site", rate:rt, n:r.n, o:r.o, h:r.h, pay});
         }
         if(site==="all" && num(e.adj)){ const a=W[w.id]||(W[w.id]={w,days:0,n:0,o:0,h:0,normalPay:0,otPay:0,gross:0,adj:0,sites:new Set()}); a.adj+=num(e.adj); T.adj+=num(e.adj); }
       }
@@ -1092,7 +1146,7 @@ function renderProfiles(){
         <div class="avatar" aria-hidden="true">${esc(String(w.name||"?").split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase())}</div>
         <div style="min-width:0;flex:1"><h2 style="font-size:28px">${esc(w.name)}</h2><div class="wtrade" style="font-size:14px">${esc(w.trade||"No trade set")} · base ${fmt(num(w.rate))}/hr${isSite(w.siteId)?" · usual site "+esc(siteName(w.siteId)):""}</div>
           <div class="quick" style="margin-top:8px">${w.active===false?'<span class="chip info">Inactive</span>':'<span class="chip ok">Active</span>'}${ps?`<span class="chip ${ps.cls}">${esc(ps.txt)}${w.permitExpiry?" · "+esc(fmtDate(w.permitExpiry)):""}</span>`:""}${w.joined?`<span class="chip plain" style="background:var(--sunk)">Joined ${esc(fmtDate(w.joined))}</span>`:""}</div></div>
-        <button class="btn primary" data-slip="${id}">${esc(mon3(S.monthKey))} payslip</button></div></div>
+        <div class="quick"><button class="btn primary" data-slip="${id}">${esc(mon3(S.monthKey))} payslip</button>${ed?`<button class="btn del" data-delw="${id}">Remove worker</button>`:""}</div></div></div>
 
       <div class="kpis">
         <div class="kpi lead"><span class="k">Net pay · ${esc(labelOf(S.monthKey))}</span><span class="v">${fmt0(m.net)}</span><span class="s">gross ${fmt(m.gross)}</span></div>
@@ -1185,7 +1239,7 @@ function dateKeyDay(offset){ const t=new Date(); const x=new Date(t.getFullYear(
 /* ---------- events ---------- */
 document.addEventListener("click", e=>{
   const b=e.target.closest("button,[data-go]"); if(!b) return;
-  if(b.matches("nav.tabs button")){ if(b.dataset.tab==="export"){ EX.cache={}; EX.result=null; } S.tab=b.dataset.tab; S.selected.clear(); S._stripScrolled=false; render(); return; }
+  if(b.matches("nav.tabs button")){ if(b.dataset.tab==="payroll"){ EX.cache={}; PY.resKey=""; } S.tab=b.dataset.tab; S.selected.clear(); S._stripScrolled=false; render(); return; }
   if(b.dataset.go){ S.tab=b.dataset.go; render(); return; }
   if(b.id==="prevM"){ goMonth(-1); return; } if(b.id==="nextM"){ goMonth(1); return; }
   if(b.id==="goDue"){ const t=targetDay(); goTo(t.key,t.day); if(t.after){ S.filterSite="none"; render(); } return; }
@@ -1227,6 +1281,7 @@ document.addEventListener("click", e=>{
   if(b.id==="closeSlip"){ const d=$("#slipDlg"); d.close?d.close():d.removeAttribute("open"); return; }
   if(b.id==="copySlip"){ copyText(slipText(S.slipFor),"Payslip copied."); return; }
   if(b.id==="csvBtn"){ saveCsv(`payroll-${S.monthKey}.csv`,payrollCsv()); return; }
+  if(b.dataset.dl){ pyDownload(b.dataset.dl); return; }
   if(b.id==="exDownload"&&EX.result){ saveCsv(exFilename(),exCsv()); return; }
   if(b.id==="exCopy"&&EX.result){ copyText(exCsv(),"CSV copied. Paste it into Excel or Google Sheets."); return; }
   if(b.id==="csvDaily"){ saveCsv(`daily-roster-${S.monthKey}.csv`,dailyCsv()); return; }
@@ -1260,6 +1315,10 @@ document.addEventListener("change", e=>{
   const t=e.target;
   if(t.id==="restoreFile"&&t.files&&t.files[0]){ const fr=new FileReader(); fr.onload=()=>{ try{ const o=JSON.parse(fr.result); if(!o||typeof o!=="object"||!o.workers||!o.sites) throw 0; showRestore(o); }catch(e){ toast("That file isn't a Site Payroll Board backup."); } t.value=""; }; fr.readAsText(t.files[0]); return; }
   if(t.id==="fSite"){ S.filterSite=t.value; S.selected.clear(); render(); return; }
+  if(t.id==="pyPeriod"){ PY.period=t.value; if(!PY.year) PY.year=ym(S.monthKey)[0]; PY.err=false; render(); return; }
+  if(t.id==="pyYear"){ PY.year=+t.value; PY.err=false; render(); return; }
+  if(t.id==="pySite"){ PY.site=t.value; PY.err=false; render(); return; }
+  if(t.id==="pyMonth"){ flushMonth(); S.monthKey=t.value; S.day=todayIn(t.value)||1; S._stripScrolled=false; try{history.replaceState(null,"","#m"+S.monthKey)}catch(_){} PY.err=false; subscribeMonth(); render(); return; }
   if(["exPeriod","exMonth","exYear","exSite","exReport"].includes(t.id)){ const k={exPeriod:"period",exMonth:"month",exYear:"year",exSite:"site",exReport:"report"}[t.id]; EX[k]= k==="year"?+t.value:t.value; EX.result=null; EX.err=""; renderExport(); return; }
   if(t.id==="hlSite"){ S.hlSite=t.value; render(); return; }
   if(t.classList.contains("sel")){ t.checked?S.selected.add(t.dataset.w):S.selected.delete(t.dataset.w); render(); return; }
