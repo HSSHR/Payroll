@@ -1148,6 +1148,17 @@ function renderProfiles(){
           <div class="quick" style="margin-top:8px">${w.active===false?'<span class="chip info">Inactive</span>':'<span class="chip ok">Active</span>'}${ps?`<span class="chip ${ps.cls}">${esc(ps.txt)}${w.permitExpiry?" · "+esc(fmtDate(w.permitExpiry)):""}</span>`:""}${w.joined?`<span class="chip plain" style="background:var(--sunk)">Joined ${esc(fmtDate(w.joined))}</span>`:""}</div></div>
         <div class="quick"><button class="btn primary" data-slip="${id}">${esc(mon3(S.monthKey))} payslip</button>${ed?`<button class="btn del" data-delw="${id}">Remove worker</button>`:""}</div></div></div>
 
+        <div class="panel"><div class="panel-head"><h2>Details</h2><p>Changes save as you leave each field.</p></div>
+          <div class="settings" style="max-width:none;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+            ${f("name","Full name")}${f("dob","Date of birth","date",' max="'+new Date().toISOString().slice(0,10)+'"')}
+            <label for="pf-rate">Base rate per hour<input type="number" min="0" step="0.5" id="pf-rate" data-wid="${id}" data-k="rate" value="${w.rate??""}"${dis}></label>
+            ${f("phone","Phone","tel")}${f("nationality","Nationality")}
+            ${f("idNo","FIN no.")}${f("permitExpiry","Work permit expiry","date")}
+            ${f("joined","Date joined","date")}${openAccess()?"":f("bank","Bank account / PayNow")}
+            ${f("emergency","Emergency contact")}
+            <label class="check" for="pf-active" style="align-self:center"><input type="checkbox" id="pf-active" data-wid="${id}" data-k="active"${w.active!==false?" checked":""}${dis}> <span>Active (shows on the roster)</span></label>
+            <label for="pf-notes" style="grid-column:1/-1">Notes<textarea id="pf-notes" data-wid="${id}" data-k="notes" rows="3" style="font:inherit;background:var(--surface);color:var(--fg);border:1px solid var(--line-strong);border-radius:var(--r);padding:8px"${dis}>${esc(w.notes||"")}</textarea></label>
+          </div></div>
       <div class="kpis">
         <div class="kpi lead"><span class="k">Net pay · ${esc(labelOf(S.monthKey))}</span><span class="v">${fmt0(m.net)}</span><span class="s">gross ${fmt(m.gross)}</span></div>
         <div class="kpi"><span class="k">Days worked</span><span class="v">${m.days}</span><span class="s">${m.siteCount} site${m.siteCount===1?"":"s"}</span></div>
@@ -1162,21 +1173,8 @@ function renderProfiles(){
         <div class="panel"><div class="panel-head"><h2>Earnings ${ym(S.monthKey)[0]}</h2><p>Gross pay per month.</p></div>${ytd}</div>
       </div>
 
-      <div class="grid2">
-        <div class="panel"><div class="panel-head"><h2>Details</h2><p>Changes save as you leave each field.</p></div>
-          <div class="settings" style="max-width:none;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-            ${f("name","Full name")}
-            <label for="pf-rate">Base rate per hour<input type="number" min="0" step="0.5" id="pf-rate" data-wid="${id}" data-k="rate" value="${w.rate??""}"${dis}></label>
-            ${f("phone","Phone","tel")}${f("nationality","Nationality")}
-            ${openAccess()?"":f("idNo","FIN / work permit no.")}${f("permitExpiry","Work permit expiry","date")}
-            ${f("joined","Date joined","date")}${openAccess()?"":f("bank","Bank account / PayNow")}
-            ${f("emergency","Emergency contact")}
-            <label class="check" for="pf-active" style="align-self:center"><input type="checkbox" id="pf-active" data-wid="${id}" data-k="active"${w.active!==false?" checked":""}${dis}> <span>Active (shows on the roster)</span></label>
-            <label for="pf-notes" style="grid-column:1/-1">Notes<textarea id="pf-notes" data-wid="${id}" data-k="notes" rows="3" style="font:inherit;background:var(--surface);color:var(--fg);border:1px solid var(--line-strong);border-radius:var(--r);padding:8px"${dis}>${esc(w.notes||"")}</textarea></label>
-          </div></div>
         <div class="panel"><div class="panel-head"><h2>Pay rate at each site</h2><p>Enter a rate to give ${esc(w.name)} their own pay at that site. Leave empty for the default.</p></div>
           <div class="rates">${rates}</div></div>
-      </div>
     </div></div>`;
 }
 
