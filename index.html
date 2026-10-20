@@ -70,6 +70,7 @@ nav.tabs{display:flex;gap:2px;overflow-x:auto;margin-top:2px}
 nav.tabs button{border:0;background:none;padding:11px 14px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:3px solid transparent;white-space:nowrap}
 nav.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
 main{padding-block:18px 48px;display:grid;gap:18px}
+body.role-entry .pay{display:none!important}
 main > *,main section > div,main section > .panel{min-width:0}
 .notice{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--accent-soft);border:1px solid var(--line);border-radius:var(--r);padding:10px 14px}
 .notice p{margin:0;flex:1 1 280px;min-width:0}
@@ -319,7 +320,9 @@ function payRuleText(s){ const v=num(s.payValue); if(s.payMode==="fixed") return
 
 /* ---------- pay maths ---------- */
 const locked = () => !!(S.month && S.month.locked);
-const editable = () => S.canWrite && !locked();
+const IS_ENTRY = (window.APP_ROLE||"")==="entry";
+const ENTRY_TABS = ["roster","grid","profiles","team"];
+const editable = () => S.canWrite && !locked() && !IS_ENTRY;
 function entryIn(md,wid){ return (md && md.entries && md.entries[wid]) || {}; }
 function entry(wid){ return entryIn(S.month,wid); }
 function recIn(md,wid,d){ const r=(entryIn(md,wid).days||{})[d]; return r ? {s:r.s||"", n:num(r.n), o:num(r.o), h:num(r.h), set:true} : {s:"",n:0,o:0,h:0,set:false}; }
@@ -635,7 +638,9 @@ function render(){
   $("#monthLabel").textContent = labelOf(S.monthKey);
   const lk=locked(); const chip=$("#lockChip"); chip.className="chip "+(lk?"ok":"draft"); chip.textContent=lk?"Finalised":"Draft";
   const lb=$("#lockBtn"); lb.textContent=lk?"Reopen month":"Finalise month"; lb.disabled=!S.canWrite||!isReady();
-  document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.tab===S.tab)));
+  if(IS_ENTRY){ document.body.classList.add("role-entry"); if(!ENTRY_TABS.includes(S.tab)) S.tab="roster"; const lb0=$("#lockBtn"); if(lb0) lb0.hidden=true;
+    const sm=document.querySelector(".brand small"); if(sm) sm.textContent="Data entry · daily site roster"; }
+  document.querySelectorAll("nav.tabs button").forEach(b=>{ b.setAttribute("aria-selected",String(b.dataset.tab===S.tab)); if(IS_ENTRY) b.hidden=!ENTRY_TABS.includes(b.dataset.tab); });
   TABS.forEach(t=>{$("#view-"+t).hidden = t!==S.tab});
   renderDue();
   let notice="";
@@ -654,7 +659,7 @@ function captureFocus(){ const a=document.activeElement; if(!a||!a.id||a===docum
 function restoreFocus(f){ if(!f) return; const el=document.getElementById(f.id); if(!el) return; if(f.typing&&el.tagName==="INPUT"&&el.type!=="checkbox"&&!f.noKeep) el.value=f.val; el.focus({preventScroll:true}); try{ if(f.s!=null) el.setSelectionRange(f.s,f.e) }catch(e){} }
 function siteOptions(sel,opts){ opts=opts||{}; let h=`<option value=""${!sel?" selected":""}>${esc(opts.none||"— Choose site —")}</option>`;
   if(opts.off!==false) h+=`<option value="${OFF}"${sel===OFF?" selected":""}>Off / rest day</option>`;
-  for(const s of siteList()) h+=`<option value="${esc(s.id)}"${s.id===sel?" selected":""}>${esc(s.name)}</option>`; return h; }
+  for(const s of siteList()){ const done=s.status==="completed"; if(done && s.id!==sel) continue; h+=`<option value="${esc(s.id)}"${s.id===sel?" selected":""}>${esc(s.name)}${done?" (completed)":""}</option>`; } return h; }
 function emptySetup(){ return `<div class="panel"><div class="empty"><h3>No workers or sites yet</h3><p>Set up your crew and project sites to start the daily roster. You can rename everyone afterwards.</p>
   ${S.canWrite?'<button class="btn primary" id="quickSetup">Create 22 workers and 15 sites</button><button class="linkbtn" data-go="profiles">Or add workers one by one</button>':''}${S.mode==="local"?'<button class="linkbtn" data-go="settings">Restore from a backup file</button>':''}</div></div>`; }
 function siteFilterOptions(val){ return `<option value="all"${val==="all"?" selected":""}>All workers</option><option value="none"${val==="none"?" selected":""}>Not assigned yet</option><option value="${OFF}"${val===OFF?" selected":""}>Off</option>`+siteList().map(s=>`<option value="${esc(s.id)}"${val===s.id?" selected":""}>${esc(s.name)}</option>`).join(""); }
@@ -695,13 +700,13 @@ function renderRoster(){
     const hd = r.s===OFF?" disabled":dis;
     body+=`<tr>
       <td><input type="checkbox" class="sel" id="sel-${id}" data-w="${id}" aria-label="Select ${esc(wl(w))}"${S.selected.has(w.id)?" checked":""}${dis}></td>
-      <td><button class="linkname" data-profile="${id}">${esc(wl(w))}</button><span class="wtrade">Base ${num(w.rate).toFixed(2)}/hr</span></td>
+      <td><button class="linkname" data-profile="${id}">${esc(wl(w))}</button><span class="wtrade pay">Base ${num(w.rate).toFixed(2)}/hr</span></td>
       <td><div class="sitecell"><select class="site${selVal?"":" none"}" id="site-${id}" data-w="${id}" aria-label="Site for ${esc(wl(w))}"${dis}>${siteOptions(selVal)}</select><span id="runwrap-${id}">${runCell(w.id,d,dis)}</span></div></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="n-${id}" data-w="${id}" data-f="n" value="${r.n||""}" placeholder="0" aria-label="Normal hours"${hd}></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="o-${id}" data-w="${id}" data-f="o" value="${r.o||""}" placeholder="0" aria-label="Overtime hours"${hd}></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="h-${id}" data-w="${id}" data-f="h" value="${r.h||""}" placeholder="0" aria-label="Rest day or public holiday hours"${hd}></td>
-      <td class="num mono" id="rt-${id}" title="${isSite(r.s)&&customRate(w.id,r.s)!==null?"Custom rate for this worker at this site":"Base rate and site rule"}">${rt.toFixed(2)}${isSite(r.s)&&customRate(w.id,r.s)!==null?"*":""}</td>
-      <td class="num net" id="pay-${id}">${pay?fmt(pay):"—"}</td>
+      <td class="num mono pay" id="rt-${id}" title="${isSite(r.s)&&customRate(w.id,r.s)!==null?"Custom rate for this worker at this site":"Base rate and site rule"}">${rt.toFixed(2)}${isSite(r.s)&&customRate(w.id,r.s)!==null?"*":""}</td>
+      <td class="num net pay" id="pay-${id}">${pay?fmt(pay):"—"}</td>
       <td id="st-${id}">${statusChip(r)}</td></tr>`; }
   if(!rows.length) body=`<tr><td colspan="9"><div class="empty"><p>No workers match this filter.</p></div></td></tr>`;
   const sel=S.selected.size, sun=wdOf(S.monthKey,d)===0;
@@ -713,8 +718,8 @@ function renderRoster(){
     <div class="kpis" style="margin:12px 14px 0;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
       <div class="kpi lead"><span class="k">Assigned</span><span class="v" id="d-asg">${ws.length-unas}<small> / ${ws.length}</small></span><span class="s">${unas?`<span class="chip warn">${unas} still to assign</span>`:"Everyone has a site or is off"}</span></div>
       <div class="kpi"><span class="k">On site</span><span class="v">${ws.length-unas-off}</span><span class="s">${off} off</span></div>
-      <div class="kpi"><span class="k">Sites active</span><span class="v">${Object.keys(dep).length}<small> / ${siteList().length}</small></span></div>
-      <div class="kpi"><span class="k">Day labour cost</span><span class="v" id="d-cost">${fmt0(cost)}</span><span class="s">at each site's pay rate</span></div>
+      <div class="kpi"><span class="k">Sites active</span><span class="v">${Object.keys(dep).length}<small> / ${siteList().filter(x=>x.status!=="completed").length}</small></span></div>
+      <div class="kpi pay"><span class="k">Day labour cost</span><span class="v" id="d-cost">${fmt0(cost)}</span><span class="s">at each site's pay rate</span></div>
     </div>
     <div class="deploy" aria-label="Crew per site">${depChips||'<span class="wtrade">Nobody assigned yet for this day.</span>'}</div>
     <div class="panel-head" style="border-top:1px solid var(--line)">
@@ -731,9 +736,9 @@ function renderRoster(){
     </div>
     <div class="scroll"><table>
       <thead><tr><th><input type="checkbox" id="selAll" aria-label="Select all shown"${rows.length&&rows.every(w=>S.selected.has(w.id))?" checked":""}${dis}></th>
-        <th>Worker</th><th>Site &amp; how long</th><th class="num">Normal</th><th class="num">OT ${S.settings.ot15}×</th><th class="num">RD/PH ${S.settings.ot20}×</th><th class="num">Rate/hr</th><th class="num">Day pay</th><th>Status</th></tr></thead>
+        <th>Worker</th><th>Site &amp; how long</th><th class="num">Normal</th><th class="num">OT ${S.settings.ot15}×</th><th class="num">RD/PH ${S.settings.ot20}×</th><th class="num pay">Rate/hr</th><th class="num pay">Day pay</th><th>Status</th></tr></thead>
       <tbody>${body}</tbody>
-      <tfoot><tr><td></td><td colspan="2">Day total · ${rows.length} shown</td><td class="num mono" id="ft-n">${hrs(ft.n)}</td><td class="num mono" id="ft-o">${hrs(ft.o)}</td><td class="num mono" id="ft-h">${hrs(ft.h)}</td><td></td><td class="num net" id="ft-pay">${fmt(ft.pay)}</td><td></td></tr></tfoot>
+      <tfoot><tr><td></td><td colspan="2">Day total · ${rows.length} shown</td><td class="num mono" id="ft-n">${hrs(ft.n)}</td><td class="num mono" id="ft-o">${hrs(ft.o)}</td><td class="num mono" id="ft-h">${hrs(ft.h)}</td><td class="pay"></td><td class="num net pay" id="ft-pay">${fmt(ft.pay)}</td><td></td></tr></tfoot>
     </table></div></div>`;
   const c=document.getElementById("day-"+d); if(c && !S._stripScrolled){ c.scrollIntoView({block:"nearest",inline:"center"}); S._stripScrolled=true; }
 }
@@ -902,7 +907,7 @@ function renderSites(){
 
 /* ---------- workers & sites ---------- */
 function renderTeam(){
-  const v=$("#view-team"); const ed=S.canWrite, dis=ed?"":" disabled"; const ws=allWorkers(), ss=siteList();
+  const v=$("#view-team"); const ed=S.canWrite&&!IS_ENTRY, dis=ed?"":" disabled"; const ws=allWorkers(), ss=siteList();
   const wrows=ws.map(w=>{const id=esc(w.id); return `<tr>
     <td><input type="text" id="wn-${id}" data-wid="${id}" data-k="name" value="${esc(wl(w))}" aria-label="Worker name"${dis}></td>
     <td><input type="text" id="wt-${id}" data-wid="${id}" data-k="trade" value="${esc(w.trade||"")}" aria-label="Trade"${dis}></td>
@@ -910,19 +915,20 @@ function renderTeam(){
     <td><select id="ws-${id}" data-wid="${id}" data-k="siteId" aria-label="Usual site"${dis}>${siteOptions(isSite(w.siteId)?w.siteId:"",{none:"— None —",off:false})}</select></td>
     <td><label class="field"><input type="checkbox" id="wa-${id}" data-wid="${id}" data-k="active"${w.active!==false?" checked":""}${dis}> Active</label></td>
     <td>${ed?`<button class="linkbtn del" data-delw="${id}">Remove</button>`:""}</td></tr>`}).join("");
-  const srows=ss.map(s=>{const id=esc(s.id), mode=s.payMode||"own"; return `<tr>
+  const srows=[...ss].sort((a,b)=>(a.status==="completed")-(b.status==="completed")).map(s=>{const id=esc(s.id), mode=s.payMode||"own", done=s.status==="completed"; return `<tr${done?' style="opacity:.7"':""}>
     <td><input type="text" id="sn-${id}" data-sid="${id}" data-k="name" value="${esc(s.name)}" aria-label="Site name"${dis}></td>
     <td><input type="text" id="sl-${id}" data-sid="${id}" data-k="location" value="${esc(s.location||"")}" maxlength="7" style="width:84px" aria-label="Short code"${dis}></td>
-    <td><div class="payrule"><select id="sp-${id}" data-sid="${id}" data-k="payMode" aria-label="Pay at this site"${dis}>
+    <td class="pay"><div class="payrule"><select id="sp-${id}" data-sid="${id}" data-k="payMode" aria-label="Pay at this site"${dis}>
         <option value="own"${mode==="own"?" selected":""}>Worker's base rate</option>
         <option value="plus"${mode==="plus"?" selected":""}>Base + extra per hour</option>
         <option value="fixed"${mode==="fixed"?" selected":""}>Fixed site rate per hour</option></select>
       ${mode==="own"?"":`<input type="number" min="0" step="0.5" id="sv-${id}" data-sid="${id}" data-k="payValue" value="${num(s.payValue)}" aria-label="${mode==="plus"?"Extra per hour":"Site rate per hour"}"${dis}>`}</div></td>
-    <td>${ed?`<button class="linkbtn del" data-dels="${id}">Remove</button>`:""}</td></tr>`}).join("");
+    <td>${done?`<span class="chip ok">Completed${s.completedOn?" · "+esc(fmtDate(s.completedOn)):""}</span>`:`<span class="chip info">Ongoing</span>`}</td>
+    <td style="white-space:nowrap">${ed?`<button class="btn" data-complete="${id}">${done?"Reopen":"Mark completed"}</button> <button class="linkbtn del" data-dels="${id}">Remove</button>`:""}</td></tr>`}).join("");
   v.innerHTML=`<div style="display:grid;gap:18px">
-    <div class="panel"><div class="panel-head"><h2>Sites (${ss.length})</h2><p>The default pay at each site, used when a worker has no custom rate for it. "Base + extra" adds an allowance to each worker's base rate. "Fixed site rate" sets one hourly rate.</p>${ed?'<button class="btn primary" id="addS">Add site</button>':""}</div>
-      <div class="scroll"><table><thead><tr><th>Site name</th><th>Short code</th><th>Pay at this site</th><th></th></tr></thead><tbody>${srows||'<tr><td colspan="4"><div class="empty"><p>No sites yet.</p></div></td></tr>'}</tbody></table></div></div>
-    ${rateMatrix(ws,ss,dis)}</div>`;
+    <div class="panel"><div class="panel-head"><h2>Sites (${ss.filter(x=>x.status!=="completed").length} ongoing${ss.some(x=>x.status==="completed")?", "+ss.filter(x=>x.status==="completed").length+" completed":""})</h2><p class="pay">The default pay at each site, used when a worker has no custom rate for it. "Base + extra" adds an allowance to each worker's base rate. "Fixed site rate" sets one hourly rate.</p>${ed?'<button class="btn primary" id="addS">Add site</button>':""}</div>
+      <div class="scroll"><table><thead><tr><th>Site name</th><th>Short code</th><th class="pay">Pay at this site</th><th>Status</th><th></th></tr></thead><tbody>${srows||'<tr><td colspan="5"><div class="empty"><p>No sites yet.</p></div></td></tr>'}</tbody></table></div></div>
+    <div class="pay">${rateMatrix(ws,ss,dis)}</div></div>`;
 }
 function rateMatrix(ws,ss,dis){
   if(!ws.length||!ss.length) return "";
@@ -1111,7 +1117,7 @@ function renderProfiles(){
   const w={id:PR.wid,...S.workers[PR.wid]}; const ed=S.canWrite, dis=ed?"":" disabled"; const id=esc(w.id);
   const q=PR.q.trim().toLowerCase();
   const list=ws.filter(x=>!q||String(x.name).toLowerCase().includes(q)||String(x.empId||"").toLowerCase().includes(q)).map(x=>{ const ps=permitState(x);
-    return `<button class="plist${x.id===w.id?" on":""}" data-profile="${esc(x.id)}" aria-current="${x.id===w.id}"><span class="wname">${esc(wl(x))}</span><span class="wtrade">Base ${fmt(num(x.rate))}/hr${x.active===false?" · inactive":""}</span>${ps&&ps.cls==="warn"?`<span class="chip warn">${esc(ps.txt)}</span>`:""}</button>`; }).join("");
+    return `<button class="plist${x.id===w.id?" on":""}" data-profile="${esc(x.id)}" aria-current="${x.id===w.id}"><span class="wname">${esc(wl(x))}</span><span class="wtrade"><span class="pay">Base ${fmt(num(x.rate))}/hr</span>${x.active===false?" · inactive":""}</span>${ps&&ps.cls==="warn"?`<span class="chip warn">${esc(ps.txt)}</span>`:""}</button>`; }).join("");
   const expiring=ws.filter(x=>{const p=permitState(x); return p&&p.cls==="warn"&&x.active!==false}).length;
   // this month
   const m=monthOf(w.id), N=daysIn(S.monthKey), td=todayIn(S.monthKey);
@@ -1146,14 +1152,14 @@ function renderProfiles(){
     <div class="pmain">
       <div class="panel"><div class="phead">
         <div class="avatar" aria-hidden="true">${esc(String(w.name||"?").split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase())}</div>
-        <div style="min-width:0;flex:1"><h2 style="font-size:28px">${esc(wl(w))}</h2><div class="wtrade" style="font-size:14px">Base rate ${fmt(num(w.rate))}/hr</div>
+        <div style="min-width:0;flex:1"><h2 style="font-size:28px">${esc(wl(w))}</h2><div class="wtrade pay" style="font-size:14px">Base rate ${fmt(num(w.rate))}/hr</div>
           <div class="quick" style="margin-top:8px">${w.active===false?'<span class="chip info">Inactive</span>':'<span class="chip ok">Active</span>'}${ps?`<span class="chip ${ps.cls}">${esc(ps.txt)}${w.permitExpiry?" · "+esc(fmtDate(w.permitExpiry)):""}</span>`:""}${w.joined?`<span class="chip plain" style="background:var(--sunk)">Joined ${esc(fmtDate(w.joined))}</span>`:""}</div></div>
-        <div class="quick"><button class="btn primary" data-slip="${id}">${esc(mon3(S.monthKey))} payslip</button>${ed?`<button class="btn del" data-delw="${id}">Remove worker</button>`:""}</div></div></div>
+        <div class="quick"><button class="btn primary pay" data-slip="${id}">${esc(mon3(S.monthKey))} payslip</button>${ed&&!IS_ENTRY?`<button class="btn del" data-delw="${id}">Remove worker</button>`:""}</div></div></div>
 
         <div class="panel"><div class="panel-head"><h2>Details</h2><p>Changes save as you leave each field.</p></div>
           <div class="settings" style="max-width:none;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
             ${f("empId","Worker ID",null,' placeholder="e.g. HSS 001"')}${f("name","Full name")}${f("dob","Date of birth","date",' max="'+new Date().toISOString().slice(0,10)+'"')}
-            <label for="pf-rate">Base rate per hour<input type="number" min="0" step="0.5" id="pf-rate" data-wid="${id}" data-k="rate" value="${w.rate??""}"${dis}></label>
+            <label for="pf-rate">Base rate per hour<input type="number" min="0" step="0.5" id="pf-rate" data-wid="${id}" data-k="rate" value="${w.rate??""}"${IS_ENTRY?" disabled title=\"Set by the manager\"":dis}></label>
             ${f("phone","Phone","tel")}${f("nationality","Nationality")}
             ${f("idNo","FIN no.")}${f("permitNo","Work permit no.")}${f("permitExpiry","Work permit expiry","date")}
             ${f("joined","Date joined","date")}${openAccess()?"":f("bank","Bank account / PayNow")}
@@ -1162,7 +1168,7 @@ function renderProfiles(){
             <label for="pf-notes" style="grid-column:1/-1">Notes<textarea id="pf-notes" data-wid="${id}" data-k="notes" rows="3" style="font:inherit;background:var(--surface);color:var(--fg);border:1px solid var(--line-strong);border-radius:var(--r);padding:8px"${dis}>${esc(w.notes||"")}</textarea></label>
           </div></div>
       <div class="kpis">
-        <div class="kpi lead"><span class="k">Net pay · ${esc(labelOf(S.monthKey))}</span><span class="v">${fmt0(m.net)}</span><span class="s">gross ${fmt(m.gross)}</span></div>
+        <div class="kpi lead pay"><span class="k">Net pay · ${esc(labelOf(S.monthKey))}</span><span class="v">${fmt0(m.net)}</span><span class="s">gross ${fmt(m.gross)}</span></div>
         <div class="kpi"><span class="k">Days worked</span><span class="v">${m.days}</span><span class="s">${m.siteCount} site${m.siteCount===1?"":"s"}</span></div>
         <div class="kpi"><span class="k">Hours</span><span class="v">${hrs(m.totalHrs)}</span><span class="s">${hrs(m.otHrs)} OT / RD / PH</span></div>
         <div class="kpi"><span class="k">OT vs limit</span><span class="v">${hrs(m.otHrs)}<small> / ${num(S.settings.otLimit)}</small></span><span class="s">${m.otHrs>num(S.settings.otLimit)?'<span class="chip warn">Over limit</span>':"within limit"}</span></div>
@@ -1171,11 +1177,11 @@ function renderProfiles(){
       <div class="grid2">
         <div class="panel"><div class="panel-head"><h2>${esc(labelOf(S.monthKey))}</h2><p>Site each day. Tap a day to edit it in the roster.</p></div>
           <div class="cal">${cal}</div>
-          ${bySite?`<div class="scroll"><table><thead><tr><th>Site</th><th class="num">Days</th><th class="num">Hours</th><th class="num">Rate</th><th class="num">Earned</th></tr></thead><tbody>${bySite}</tbody></table></div>`:'<p class="wtrade" style="padding:0 14px 14px">No hours this month yet.</p>'}</div>
-        <div class="panel"><div class="panel-head"><h2>Earnings ${ym(S.monthKey)[0]}</h2><p>Gross pay per month.</p></div>${ytd}</div>
+          ${bySite?`<div class="scroll pay"><table><thead><tr><th>Site</th><th class="num">Days</th><th class="num">Hours</th><th class="num">Rate</th><th class="num">Earned</th></tr></thead><tbody>${bySite}</tbody></table></div>`:'<p class="wtrade" style="padding:0 14px 14px">No hours this month yet.</p>'}</div>
+        <div class="panel pay"><div class="panel-head"><h2>Earnings ${ym(S.monthKey)[0]}</h2><p>Gross pay per month.</p></div>${ytd}</div>
       </div>
 
-        <div class="panel"><div class="panel-head"><h2>Pay rate at each site</h2><p>Enter a rate to give ${esc(wl(w))} their own pay at that site. Leave empty for the default.</p></div>
+        <div class="panel pay"><div class="panel-head"><h2>Pay rate at each site</h2><p>Enter a rate to give ${esc(wl(w))} their own pay at that site. Leave empty for the default.</p></div>
           <div class="rates">${rates}</div></div>
     </div></div>`;
 }
@@ -1274,6 +1280,12 @@ document.addEventListener("click", e=>{
   if(b.id==="restoreGo" && pendingRestore && S.mode==="local"){ const o=pendingRestore; pendingRestore=null;
     S.settings={...DEFAULT_SETTINGS,...(o.settings||{}),sample:false}; S.workers=o.workers||{}; S.sites=o.sites||{}; S.memMonths=o.months||{}; S.month=S.memMonths[S.monthKey]||null;
     persistNow(); subscribeMonth(); render(); toast("Backup restored."); return; }
+  if(b.dataset.complete && S.canWrite && !IS_ENTRY){ const id=b.dataset.complete, done=(S.sites[id]||{}).status==="completed";
+    if(!done && b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="Confirm completed"; setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent="Mark completed"}},3000); return; }
+    const t=new Date(), iso=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;
+    const patch = done ? {status:"ongoing",completedOn:null} : {status:"completed",completedOn:iso};
+    S.sites[id]={...S.sites[id],...patch}; if(done){ delete S.sites[id].completedOn; } saveDoc("sites",id,patch,true);
+    toast(done?`${siteName(id)} reopened. It's back in the roster.`:`${siteName(id)} marked completed. It no longer appears when assigning sites; its history stays in payroll and reports.`); render(); return; }
   if(b.dataset.profile){ openProfile(b.dataset.profile); return; }
   if(b.id==="addWP"){ const id=nextId("w",S.workers); S.workers[id]={name:"New worker",trade:"",rate:0,siteId:"",active:true,order:nextOrder(S.workers)}; saveDoc("workers",id,S.workers[id],false); openProfile(id); const el=document.getElementById("pf-name"); if(el){el.focus();el.select()} return; }
   if(b.dataset.slip){ openSlip(b.dataset.slip); return; }
