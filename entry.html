@@ -15,7 +15,7 @@ window.SUPABASE_CONFIG = {
 window.APP_ROLE = "entry";  // data entry link: no pay, roster view-only
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<meta name="app-version" content="20261020085611">
+<meta name="app-version" content="20261020091049">
 <title>Hong Soon Seng Roster Entry</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23e0a100%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Arial%27 font-weight=%27700%27 font-size=%2716%27 text-anchor=%27middle%27 fill=%27%232a2000%27%3ESP%3C/text%3E%3C/svg%3E">
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -291,7 +291,7 @@ const TABS = ["roster","grid","payroll","sites","profiles","team","settings"];
 const OFF = "off";
 const DUE_HOUR = 18;
 const COMPANY = "Hong Soon Seng Construction & Trading Pte Ltd";
-const DEFAULT_SETTINGS = {company:COMPANY, currency:"S$", ot15:1.5, ot20:2.0, otLimit:72, dayHours:8, workWeek:6, autoFill:true, skipSun:true, sample:false};
+const DEFAULT_SETTINGS = {company:COMPANY, currency:"S$", ot15:1.5, ot20:2.0, otLimit:72, dayHours:8, workWeek:6, dayBasis:"fixed26", autoFill:true, skipSun:true, sample:false};
 
 const S = {
   db:null, live:false, canWrite:true, loaded:{workers:false,sites:false,settings:false,month:false},
@@ -364,13 +364,14 @@ function salaryOf(wid){ const fz=S.month&&S.month.frozen; if(locked()&&fz&&fz.sa
 const monthlyHr = wid => 12*salaryOf(wid)/(52*44);
 function isWorkingDay(key,d){ const wd=wdOf(key,d), ww=num(S.settings.workWeek)||6; return ww>=5.5 ? wd!==0 : (wd!==0 && wd!==6); }
 function workingDaysIn(key){ let c=0; for(let d=1; d<=daysIn(key); d++) if(isWorkingDay(key,d)) c++; return c||1; }
-function salaryInfo(wid){ const key=S.monthKey, WD=workingDaysIn(key), sal=salaryOf(wid), daily=sal/WD, t=new Date(), cur=keyOf(t);
+const salaryDivisor = key => S.settings.dayBasis==="calendar" ? workingDaysIn(key) : 26;
+function salaryInfo(wid){ const key=S.monthKey, WD=workingDaysIn(key), div=salaryDivisor(key), sal=salaryOf(wid), daily=sal/div, t=new Date(), cur=keyOf(t);
   const lastPast = key<cur ? daysIn(key) : key===cur ? t.getDate()-1 : 0;
   let missed=0; for(let d=1; d<=lastPast; d++){ if(!isWorkingDay(key,d)) continue; const r=dayRec(wid,d); if(r.n+r.o+r.h<=0) missed++; }
-  return {sal, WD, daily, missed, worked:WD-missed, pay:Math.max(0,sal-missed*daily), hr:monthlyHr(wid), toDate:key===cur}; }
+  return {sal, WD, div, daily, missed, worked:WD-missed, pay:Math.max(0,sal-missed*daily), hr:monthlyHr(wid), toDate:key===cur}; }
 function dayParts(wid,r,d){ const st=S.settings, key=S.monthKey;
   if(isMonthly(wid)){ const hr=monthlyHr(wid), work=isWorkingDay(key,d), any=(r.n+r.o+r.h)>0;
-    const np = work && any ? salaryOf(wid)/workingDaysIn(key) : 0;
+    const np = work && any ? salaryOf(wid)/salaryDivisor(key) : 0;
     const rd = r.h + (work?0:r.n);
     const o1 = hr*r.o*num(st.ot15), o2 = hr*rd*num(st.ot20);
     return {np, o1, o2, op:o1+o2, rt:hr, rdExtra: work?0:r.n}; }
@@ -994,7 +995,8 @@ function renderSettings(){
     <label class="check" for="stSkip"><input type="checkbox" id="stSkip" data-st="skipSun"${st.skipSun?" checked":""}${dis}> <span>Skip Sundays when assigning several days<br><span class="hint">"For 6 days" from Monday then runs Monday to Saturday.</span></span></label>
     <label for="stOt15">Overtime multiplier<input type="number" step="0.1" min="1" id="stOt15" data-st="ot15" value="${st.ot15}"${dis}><span class="hint">Hours beyond the normal day. Singapore's Employment Act sets at least 1.5×.</span></label>
     <label for="stOt20">Rest day / public holiday multiplier<input type="number" step="0.1" min="1" id="stOt20" data-st="ot20" value="${st.ot20}"${dis}><span class="hint">Applied to hours in the RD/PH column.</span></label>
-    <label for="stWeek">Work week for monthly-salaried staff<select id="stWeek" data-st="workWeek"${dis}><option value="6"${num(st.workWeek)===6?" selected":""}>6 days (Mon–Sat)</option><option value="5.5"${num(st.workWeek)===5.5?" selected":""}>5½ days (Mon–Sat, half Saturday)</option><option value="5"${num(st.workWeek)===5?" selected":""}>5 days (Mon–Fri)</option></select><span class="hint">Used to count working days in a month. A monthly salary is reduced by salary ÷ working days for each working day not worked (MOM incomplete-month formula).</span></label>
+    <label for="stWeek">Work week for monthly-salaried staff<select id="stWeek" data-st="workWeek"${dis}><option value="6"${num(st.workWeek)===6?" selected":""}>6 days (Mon–Sat)</option><option value="5.5"${num(st.workWeek)===5.5?" selected":""}>5½ days (Mon–Sat, half Saturday)</option><option value="5"${num(st.workWeek)===5?" selected":""}>5 days (Mon–Fri)</option></select><span class="hint">Days a monthly-salaried worker is expected to work. A working day with no hours on the roster counts as a day not worked.</span></label>
+    <label for="stBasis">Day's pay for monthly salary<select id="stBasis" data-st="dayBasis"${dis}><option value="fixed26"${st.dayBasis!=="calendar"?" selected":""}>Salary ÷ 26 days (fixed)</option><option value="calendar"${st.dayBasis==="calendar"?" selected":""}>Salary ÷ working days in that month (MOM formula)</option></select><span class="hint">Each day not worked is deducted at this rate. Overtime always uses MOM's hourly rate: 12 × salary ÷ (52 × 44).</span></label>
     <label for="stLim">Monthly overtime limit (hours)<input type="number" step="1" min="0" id="stLim" data-st="otLimit" value="${st.otLimit}"${dis}><span class="hint">Workers above this are flagged. MOM's general cap is 72 OT hours a month.</span></label>
   </div></div>
   <div class="panel" style="margin-top:18px"><div class="panel-head"><h2>Backup &amp; restore</h2><p>Download everything (workers, sites, rates, every month's roster) as one file. Restore it on another computer or in the standalone version.</p></div>
@@ -1383,7 +1385,7 @@ function openSlip(wid){
     <table><tbody>${siteRows||'<tr><td colspan="4">No hours this month.</td></tr>'}</tbody></table>
     <h4>Summary</h4>
     <table><tbody>
-      ${m.monthly?`<tr><td>Monthly salary${m.salary.missed?` (${m.salary.worked} of ${m.salary.WD} working days)`:""}</td><td class="num mono">${fmt(m.salary.sal)}</td><td class="num mono">${fmt(m.normalPay)}</td></tr>`:`<tr><td>Normal hours</td><td class="num mono">${hrs(m.normal)} h</td><td class="num mono">${fmt(m.normalPay)}</td></tr>`}
+      ${m.monthly?`<tr><td>Monthly salary${m.salary.missed?` (less ${m.salary.missed} day${m.salary.missed>1?"s":""} not worked × ${fmt(m.salary.daily)})`:""}</td><td class="num mono">${fmt(m.salary.sal)}</td><td class="num mono">${fmt(m.normalPay)}</td></tr>`:`<tr><td>Normal hours</td><td class="num mono">${hrs(m.normal)} h</td><td class="num mono">${fmt(m.normalPay)}</td></tr>`}
       <tr><td>Overtime ${st.ot15}×</td><td class="num mono">${hrs(m.ot15)} h</td><td class="num mono">${fmt(m.ot15Pay)}</td></tr>
       <tr><td>Rest day / PH ${st.ot20}×</td><td class="num mono">${hrs(m.ot20)} h</td><td class="num mono">${fmt(m.ot20Pay)}</td></tr>
       <tr><td colspan="2">Gross pay</td><td class="num mono">${fmt(m.gross)}</td></tr>
