@@ -929,7 +929,7 @@ function renderTeam(){
   v.innerHTML=`<div style="display:grid;gap:18px">
     <div class="panel"><div class="panel-head"><h2>Sites (${ss.filter(x=>x.status!=="completed").length} ongoing${ss.some(x=>x.status==="completed")?", "+ss.filter(x=>x.status==="completed").length+" completed":""})</h2><p class="pay">The default pay at each site, used when a worker has no custom rate for it. "Base + extra" adds an allowance to each worker's base rate. "Fixed site rate" sets one hourly rate.</p>${ed?'<button class="btn primary" id="addS">Add site</button>':""}</div>
       <div class="scroll"><table><thead><tr><th>Site name</th><th>Short code</th><th class="pay">Pay at this site</th><th>Status</th><th></th></tr></thead><tbody>${srows||'<tr><td colspan="5"><div class="empty"><p>No sites yet.</p></div></td></tr>'}</tbody></table></div></div>
-    <div class="pay">${rateMatrix(ws,ss,dis)}</div></div>`;
+    </div>`;
 }
 function rateMatrix(ws,ss,dis){
   if(!ws.length||!ss.length) return "";
