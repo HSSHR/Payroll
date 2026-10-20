@@ -692,7 +692,7 @@ function renderRoster(){
     const hd = r.s===OFF?" disabled":dis;
     body+=`<tr>
       <td><input type="checkbox" class="sel" id="sel-${id}" data-w="${id}" aria-label="Select ${esc(w.name)}"${S.selected.has(w.id)?" checked":""}${dis}></td>
-      <td><button class="linkname" data-profile="${id}">${esc(w.name)}</button><span class="wtrade">${esc(w.trade||"")}${isSite(w.siteId)?" · usual "+esc(siteCode(w.siteId)):""}</span></td>
+      <td><button class="linkname" data-profile="${id}">${esc(w.name)}</button><span class="wtrade">Base ${num(w.rate).toFixed(2)}/hr</span></td>
       <td><div class="sitecell"><select class="site${selVal?"":" none"}" id="site-${id}" data-w="${id}" aria-label="Site for ${esc(w.name)}"${dis}>${siteOptions(selVal)}</select><span id="runwrap-${id}">${runCell(w.id,d,dis)}</span></div></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="n-${id}" data-w="${id}" data-f="n" value="${r.n||""}" placeholder="0" aria-label="Normal hours"${hd}></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="o-${id}" data-w="${id}" data-f="o" value="${r.o||""}" placeholder="0" aria-label="Overtime hours"${hd}></td>
@@ -717,11 +717,10 @@ function renderRoster(){
     <div class="panel-head" style="border-top:1px solid var(--line)">
       <div class="toolbar">
         ${ed?`<button class="btn" id="copyPrev"${d===1?" disabled":""}>Copy previous day</button>
-        <button class="btn" id="fillUsual">Fill blanks with usual site</button>
         <button class="btn" id="clearDay">Clear day</button>`:""}
         <span class="grow"></span>
         <label class="field" for="fSite">Show <select id="fSite">${siteFilterOptions(S.filterSite)}</select></label>
-        <input type="search" id="fSearch" placeholder="Search worker or trade" value="${esc(S.search)}" aria-label="Search workers">
+        <input type="search" id="fSearch" placeholder="Search worker" value="${esc(S.search)}" aria-label="Search workers">
       </div>
       ${sel&&ed?`<div class="bulk"><strong>${sel} selected</strong><label class="field" for="bulkSite">Send to <select id="bulkSite">${siteOptions("",{none:"— Choose —"})}</select></label>
         <label class="field" for="bulkDays">for <input type="number" id="bulkDays" min="1" max="${maxRun(d)}" value="1" style="width:56px"> day(s)</label>
@@ -754,7 +753,7 @@ function renderGrid(){
   for(let d=1;d<=N;d++){ const wd=wdOf(S.monthKey,d); head+=`<th class="${wd===0?"sun":""}"${d===td?' style="box-shadow:inset 0 -3px 0 var(--info)"':""}>${WD[wd][0]}<br>${d}</th>`; }
   head+=`<th class="num">Days</th><th class="num">Hours</th>`;
   const perDay=new Array(N+1).fill(0); let body="";
-  for(const w of ws){ let row=`<td class="wcol"><button class="linkname" data-profile="${esc(w.id)}">${esc(w.name)}</button><span class="wtrade">${esc(w.trade||"")}</span></td>`; let days=0,tot=0;
+  for(const w of ws){ let row=`<td class="wcol"><button class="linkname" data-profile="${esc(w.id)}">${esc(w.name)}</button></td>`; let days=0,tot=0;
     for(let d=1;d<=N;d++){ const r=dayRec(w.id,d), h=dayHrs(r);
       if(h>0){days++;tot+=h;perDay[d]++}
       if(!assigned(r) && !h){ row+=`<td><button class="cell${hl?" dim":""}" data-jump="${d}" aria-label="${esc(w.name)}, ${d}: not assigned">·</button></td>`; continue; }
@@ -843,7 +842,7 @@ function renderPayrollMonth(){
   for(const w of rows){ const m=monthOf(w.id); const id=esc(w.id);
     ft.d+=m.days; ft.n+=m.normal; ft.o+=m.ot15; ft.h+=m.ot20; ft.gross+=m.gross; ft.adj+=m.adj; ft.net+=m.net;
     const status = m.noSiteDays?`<span class="chip warn" title="Days with hours but no site">${m.noSiteDays} day${m.noSiteDays>1?"s":""} no site</span>`: m.otHrs>lim?`<span class="chip warn" title="Over the ${lim}-hour monthly overtime limit">OT ${hrs(m.otHrs)}h</span>`: m.totalHrs===0?`<span class="chip info">No hours</span>`:`<span class="chip ok">OK</span>`;
-    body+=`<tr><td><button class="linkname" data-profile="${id}">${esc(w.name)}</button><span class="wtrade">${esc(w.trade||"")}</span></td>
+    body+=`<tr><td><button class="linkname" data-profile="${id}">${esc(w.name)}</button></td>
       <td class="num mono">${m.days}</td><td class="num mono">${m.siteCount}</td><td class="num mono">${m.base.toFixed(2)}</td>
       <td class="num mono">${hrs(m.normal)}</td><td class="num mono">${hrs(m.ot15)}</td><td class="num mono">${hrs(m.ot20)}</td>
       <td class="num mono">${fmt(m.gross)}</td>
@@ -860,7 +859,7 @@ function renderPayrollMonth(){
     <div class="kpi"><span class="k">Need attention</span><span class="v">${t.overOT+t.noSite}</span><span class="s">${t.overOT?`<span class="chip warn">${t.overOT} over ${lim} OT hrs</span> `:""}${t.noSite?`<span class="chip warn">${t.noSite} with unassigned days</span>`:""}${!t.overOT&&!t.noSite?"All clear":""}</span></div>
   </div>
   <div class="panel"><div class="panel-head"><h2>Monthly payroll</h2><p>Each day is paid at that site's rate: rate × (normal + OT × ${S.settings.ot15} + RD/PH × ${S.settings.ot20}), then the adjustment is added. Open a payslip to see the rate used at each site.</p></div>
-    <div class="panel-head"><div class="toolbar"><input type="search" id="fSearch" placeholder="Search worker or trade" value="${esc(S.search)}" aria-label="Search workers"></div></div>
+    <div class="panel-head"><div class="toolbar"><input type="search" id="fSearch" placeholder="Search worker" value="${esc(S.search)}" aria-label="Search workers"></div></div>
     <div class="scroll"><table><thead><tr><th>Worker</th><th class="num">Days</th><th class="num">Sites</th><th class="num">Base/hr</th><th class="num">Normal</th><th class="num">OT ${S.settings.ot15}×</th><th class="num">RD/PH ${S.settings.ot20}×</th><th class="num">Gross</th><th class="num">Adjust ±</th><th class="num">Net pay</th><th>Status</th><th></th></tr></thead>
     <tbody>${body||'<tr><td colspan="12"><div class="empty"><p>No workers match.</p></div></td></tr>'}</tbody>
     <tfoot><tr><td>Total · ${rows.length} workers</td><td class="num mono">${ft.d}</td><td></td><td></td><td class="num mono">${hrs(ft.n)}</td><td class="num mono">${hrs(ft.o)}</td><td class="num mono">${hrs(ft.h)}</td><td class="num mono">${fmt(ft.gross)}</td><td class="num mono" id="ft-adj">${fmt(ft.adj)}</td><td class="num net" id="ft-net">${fmt(ft.net)}</td><td colspan="2"></td></tr></tfoot></table></div></div></div>`;
@@ -890,7 +889,7 @@ function renderSites(){
     <td class="num mono">${fmt(s.normalPay)}</td><td class="num mono">${fmt(s.otPay)}</td><td class="num net">${fmt(s.gross)}</td>
     <td class="num mono">${total?(s.gross/total*100).toFixed(1):"0.0"}%</td></tr>`).join("");
   const crew=sorted.filter(s=>s.manDays).map(s=>`<div class="panel"><div class="panel-head"><h2>${esc(s.name)}</h2><p>${s.crew.size} worker${s.crew.size>1?"s":""} · ${s.manDays} man-days · ${esc(s.rule)} · ${fmt(s.gross)}</p></div>
-    <div class="scroll"><table><thead><tr><th>Worker</th><th class="num">Days</th><th class="num">Hours</th><th class="num">Rate/hr</th><th class="num">Cost</th></tr></thead><tbody>${Object.values(s.people).sort((a,b)=>b.pay-a.pay).map(p=>`<tr><td><button class="linkname" data-profile="${esc(p.w.id)}">${esc(p.w.name)}</button><span class="wtrade">${esc(p.w.trade||"")}</span></td><td class="num mono">${p.days}</td><td class="num mono">${hrs(p.hours)}</td><td class="num mono">${p.rate.toFixed(2)}</td><td class="num net">${fmt(p.pay)}</td></tr>`).join("")}</tbody></table></div></div>`).join("");
+    <div class="scroll"><table><thead><tr><th>Worker</th><th class="num">Days</th><th class="num">Hours</th><th class="num">Rate/hr</th><th class="num">Cost</th></tr></thead><tbody>${Object.values(s.people).sort((a,b)=>b.pay-a.pay).map(p=>`<tr><td><button class="linkname" data-profile="${esc(p.w.id)}">${esc(p.w.name)}</button></td><td class="num mono">${p.days}</td><td class="num mono">${hrs(p.hours)}</td><td class="num mono">${p.rate.toFixed(2)}</td><td class="num net">${fmt(p.pay)}</td></tr>`).join("")}</tbody></table></div></div>`).join("");
   v.innerHTML=`<div style="display:grid;gap:18px">
     <div class="panel"><div class="panel-head"><h2>Labour cost by site</h2><p>Each day's pay is charged to the site the worker was on, at that site's pay rule. Gross before adjustments · ${esc(labelOf(S.monthKey))} · total ${fmt(total)}.</p></div>
       <div class="bars">${bars}</div><div class="legend"><span><i style="background:var(--info)"></i>Normal hours</span><span><i style="background:var(--accent)"></i>OT and RD/PH</span></div></div>
@@ -926,7 +925,7 @@ function rateMatrix(ws,ss,dis){
   if(!ws.length||!ss.length) return "";
   const head=ss.map(s=>`<th class="num" title="${esc(s.name)}">${esc(siteCode(s.id))}</th>`).join("");
   const body=ws.filter(w=>w.active!==false).map(w=>{ const sr=w.siteRates||{};
-    return `<tr><td class="wcol"><button class="linkname" data-profile="${esc(w.id)}">${esc(w.name)}</button><span class="wtrade">${esc(w.trade||"")} · base ${num(w.rate).toFixed(2)}</span></td>`+ss.map(s=>{
+    return `<tr><td class="wcol"><button class="linkname" data-profile="${esc(w.id)}">${esc(w.name)}</button><span class="wtrade">base ${num(w.rate).toFixed(2)}</span></td>`+ss.map(s=>{
       const v=sr[s.id]; const has=v!==null&&v!==undefined&&v!=="";
       const def=(()=>{ const r=S.sites[s.id]||{}, b=num(w.rate); return r.payMode==="fixed"?num(r.payValue): r.payMode==="plus"? b+num(r.payValue) : b; })();
       return `<td class="num"><input type="number" min="0" step="0.5" inputmode="decimal" id="rm-${esc(w.id)}-${esc(s.id)}" data-rw="${esc(w.id)}" data-rs="${esc(s.id)}" value="${has?num(v):""}" placeholder="${def.toFixed(2)}" aria-label="${esc(w.name)} at ${esc(s.name)}, hourly rate" style="width:66px${has?";background:var(--accent-soft);border-color:var(--accent)":""}"${dis}></td>`; }).join("")+`</tr>`; }).join("");
@@ -1007,18 +1006,18 @@ function exCompute(months){
 function exTable(res){
   const st=S.settings, adjCols=EX.site==="all";
   if(EX.report==="worker"){
-    const head=["Worker","Trade","Days","Sites","Normal hrs",`OT ${st.ot15}× hrs`,`RD/PH ${st.ot20}× hrs`,"Normal pay","OT pay","Gross"].concat(adjCols?["Adjustments","Net pay"]:[]);
-    const body=res.W.map(a=>[a.w.name,a.w.trade||"",a.days,a.sites.size,a.n,a.o,a.h,a.normalPay,a.otPay,a.gross].concat(adjCols?[a.adj,a.gross+a.adj]:[]));
-    return {head, body, money:new Set([7,8,9,10,11]), numCols:new Set([2,3,4,5,6,7,8,9,10,11])};
+    const head=["Worker","Days","Sites","Normal hrs",`OT ${st.ot15}× hrs`,`RD/PH ${st.ot20}× hrs`,"Normal pay","OT pay","Gross"].concat(adjCols?["Adjustments","Net pay"]:[]);
+    const body=res.W.map(a=>[a.w.name,a.days,a.sites.size,a.n,a.o,a.h,a.normalPay,a.otPay,a.gross].concat(adjCols?[a.adj,a.gross+a.adj]:[]));
+    return {head, body, money:new Set([6,7,8,9,10]), numCols:new Set([1,2,3,4,5,6,7,8,9,10])};
   }
   if(EX.report==="site"){
     const head=["Site","Code","Month","Workers","Man-days","Hours","OT hrs","Normal pay","OT pay","Gross"];
     const body=res.SC.map(b=>[b.sid?siteName(b.sid):"No site", b.sid?siteCode(b.sid):"—", labelOf(b.key), b.crew.size, b.manDays, b.hours, b.ot, b.normalPay, b.otPay, b.gross]);
     return {head, body, money:new Set([7,8,9]), numCols:new Set([3,4,5,6,7,8,9])};
   }
-  const head=["Date","Day","Worker","Trade","Site","Rate/hr","Normal","OT","RD/PH","Day pay"];
-  const body=res.rows.map(r=>[r.date,r.day,r.worker,r.trade,r.site,r.rate,r.n,r.o,r.h,r.pay]);
-  return {head, body, money:new Set([5,9]), numCols:new Set([5,6,7,8,9])};
+  const head=["Date","Day","Worker","Site","Rate/hr","Normal","OT","RD/PH","Day pay"];
+  const body=res.rows.map(r=>[r.date,r.day,r.worker,r.site,r.rate,r.n,r.o,r.h,r.pay]);
+  return {head, body, money:new Set([4,8]), numCols:new Set([4,5,6,7,8])};
 }
 async function exRun(){
   EX.loading=true; EX.err=""; if(S.tab==="export") renderExport();
@@ -1109,7 +1108,7 @@ function renderProfiles(){
   const w={id:PR.wid,...S.workers[PR.wid]}; const ed=S.canWrite, dis=ed?"":" disabled"; const id=esc(w.id);
   const q=PR.q.trim().toLowerCase();
   const list=ws.filter(x=>!q||String(x.name).toLowerCase().includes(q)||String(x.trade||"").toLowerCase().includes(q)).map(x=>{ const ps=permitState(x);
-    return `<button class="plist${x.id===w.id?" on":""}" data-profile="${esc(x.id)}" aria-current="${x.id===w.id}"><span class="wname">${esc(x.name)}</span><span class="wtrade">${esc(x.trade||"No trade set")}${x.active===false?" · inactive":""}</span>${ps&&ps.cls==="warn"?`<span class="chip warn">${esc(ps.txt)}</span>`:""}</button>`; }).join("");
+    return `<button class="plist${x.id===w.id?" on":""}" data-profile="${esc(x.id)}" aria-current="${x.id===w.id}"><span class="wname">${esc(x.name)}</span><span class="wtrade">Base ${fmt(num(x.rate))}/hr${x.active===false?" · inactive":""}</span>${ps&&ps.cls==="warn"?`<span class="chip warn">${esc(ps.txt)}</span>`:""}</button>`; }).join("");
   const expiring=ws.filter(x=>{const p=permitState(x); return p&&p.cls==="warn"&&x.active!==false}).length;
   // this month
   const m=monthOf(w.id), N=daysIn(S.monthKey), td=todayIn(S.monthKey);
@@ -1138,13 +1137,13 @@ function renderProfiles(){
   const f=(k,label,type,extra)=>`<label for="pf-${k}">${label}<input type="${type||"text"}" id="pf-${k}" data-wid="${id}" data-k="${k}" value="${esc(w[k]??"")}"${extra||""}${dis}></label>`;
   v.innerHTML=`<div class="profiles">
     <aside class="panel plist-wrap"><div class="panel-head"><h2>Workers</h2>${ed?'<button class="btn" id="addWP">Add</button>':""}</div>
-      <div style="padding:10px 12px 0"><input type="search" id="prSearch" placeholder="Search name or trade" value="${esc(PR.q)}" aria-label="Search workers" style="width:100%"></div>
+      <div style="padding:10px 12px 0"><input type="search" id="prSearch" placeholder="Search worker" value="${esc(PR.q)}" aria-label="Search workers" style="width:100%"></div>
       ${expiring?`<p class="wtrade" style="margin:8px 12px 0"><span class="chip warn">${expiring} permit${expiring>1?"s":""} expiring or expired</span></p>`:""}
       <div class="plist-items">${list||'<p class="wtrade" style="padding:12px">No match.</p>'}</div></aside>
     <div class="pmain">
       <div class="panel"><div class="phead">
         <div class="avatar" aria-hidden="true">${esc(String(w.name||"?").split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase())}</div>
-        <div style="min-width:0;flex:1"><h2 style="font-size:28px">${esc(w.name)}</h2><div class="wtrade" style="font-size:14px">${esc(w.trade||"No trade set")} · base ${fmt(num(w.rate))}/hr${isSite(w.siteId)?" · usual site "+esc(siteName(w.siteId)):""}</div>
+        <div style="min-width:0;flex:1"><h2 style="font-size:28px">${esc(w.name)}</h2><div class="wtrade" style="font-size:14px">Base rate ${fmt(num(w.rate))}/hr</div>
           <div class="quick" style="margin-top:8px">${w.active===false?'<span class="chip info">Inactive</span>':'<span class="chip ok">Active</span>'}${ps?`<span class="chip ${ps.cls}">${esc(ps.txt)}${w.permitExpiry?" · "+esc(fmtDate(w.permitExpiry)):""}</span>`:""}${w.joined?`<span class="chip plain" style="background:var(--sunk)">Joined ${esc(fmtDate(w.joined))}</span>`:""}</div></div>
         <div class="quick"><button class="btn primary" data-slip="${id}">${esc(mon3(S.monthKey))} payslip</button>${ed?`<button class="btn del" data-delw="${id}">Remove worker</button>`:""}</div></div></div>
 
@@ -1165,9 +1164,8 @@ function renderProfiles(){
       <div class="grid2">
         <div class="panel"><div class="panel-head"><h2>Details</h2><p>Changes save as you leave each field.</p></div>
           <div class="settings" style="max-width:none;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-            ${f("name","Full name")}${f("trade","Trade")}
+            ${f("name","Full name")}
             <label for="pf-rate">Base rate per hour<input type="number" min="0" step="0.5" id="pf-rate" data-wid="${id}" data-k="rate" value="${w.rate??""}"${dis}></label>
-            <label for="pf-siteId">Usual site<select id="pf-siteId" data-wid="${id}" data-k="siteId"${dis}>${siteOptions(isSite(w.siteId)?w.siteId:"",{none:"— None —",off:false})}</select></label>
             ${f("phone","Phone","tel")}${f("nationality","Nationality")}
             ${openAccess()?"":f("idNo","FIN / work permit no.")}${f("permitExpiry","Work permit expiry","date")}
             ${f("joined","Date joined","date")}${openAccess()?"":f("bank","Bank account / PayNow")}
@@ -1186,7 +1184,7 @@ function openSlip(wid){
   const w=S.workers[wid]; if(!w) return; const m=monthOf(wid), st=S.settings;
   const siteRows=Object.entries(m.bySite).sort((a,b)=>b[1].pay-a[1].pay).map(([sid,b])=>`<tr><td>${esc(sid?siteName(sid):"No site")}</td><td class="num mono">${b.days} d · ${hrs(b.n+b.o+b.h)} h</td><td class="num mono">@ ${b.rate.toFixed(2)}</td><td class="num mono">${fmt(b.pay)}</td></tr>`).join("");
   $("#slipBody").innerHTML=`
-    <header><div><h3>${esc(w.name)}</h3><div class="meta">${esc(w.trade||"")} · ${m.days} days · ${m.siteCount} site${m.siteCount===1?"":"s"}</div></div>
+    <header><div><h3>${esc(w.name)}</h3><div class="meta">${m.days} days · ${m.siteCount} site${m.siteCount===1?"":"s"}</div></div>
     <div class="meta" style="text-align:right">${esc(st.company)}<br>Payslip · ${esc(labelOf(S.monthKey))}</div></header>
     <h4>Earnings by site</h4>
     <table><tbody>${siteRows||'<tr><td colspan="4">No hours this month.</td></tr>'}</tbody></table>
@@ -1205,7 +1203,7 @@ function openSlip(wid){
 }
 function slipText(wid){ const w=S.workers[wid], m=monthOf(wid), st=S.settings;
   const sites=Object.entries(m.bySite).map(([sid,b])=>`  ${sid?siteName(sid):"No site"}: ${b.days} days, ${hrs(b.n+b.o+b.h)} h @ ${b.rate.toFixed(2)} = ${fmt(b.pay)}`).join("\n");
-  return `${st.company} — Payslip ${labelOf(S.monthKey)}\n${w.name} (${w.trade||""}) · ${m.days} days\n${sites}\nNormal ${hrs(m.normal)} h = ${fmt(m.normalPay)}\nOT ${st.ot15}× ${hrs(m.ot15)} h = ${fmt(m.ot15Pay)}\nRD/PH ${st.ot20}× ${hrs(m.ot20)} h = ${fmt(m.ot20Pay)}\nGross: ${fmt(m.gross)}\nAdjustments: ${fmt(m.adj)}\nNET PAY: ${fmt(m.net)}`; }
+  return `${st.company} — Payslip ${labelOf(S.monthKey)}\n${w.name} · ${m.days} days\n${sites}\nNormal ${hrs(m.normal)} h = ${fmt(m.normalPay)}\nOT ${st.ot15}× ${hrs(m.ot15)} h = ${fmt(m.ot15Pay)}\nRD/PH ${st.ot20}× ${hrs(m.ot20)} h = ${fmt(m.ot20Pay)}\nGross: ${fmt(m.gross)}\nAdjustments: ${fmt(m.adj)}\nNET PAY: ${fmt(m.net)}`; }
 
 /* ---------- CSV ---------- */
 const cell=v=>{const s=String(v??""); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
@@ -1217,13 +1215,13 @@ async function saveCsv(name,data,type){
   catch(e){ if(e&&e.code==="unavailable") copyText(data,"CSV copied. Paste it into Excel or Google Sheets."); }
 }
 function payrollCsv(){ const st=S.settings;
-  const L=[["Worker","Trade","Days","Sites","Base rate per hr","Normal hrs",`OT ${st.ot15}x hrs`,`RD/PH ${st.ot20}x hrs`,"Normal pay","OT pay","Gross","Adjustment","Net pay"].map(cell).join(",")];
-  for(const w of workerList()){ const m=monthOf(w.id); L.push([w.name,w.trade||"",m.days,m.siteCount,m.base.toFixed(2),m.normal,m.ot15,m.ot20,m.normalPay.toFixed(2),m.otPay.toFixed(2),m.gross.toFixed(2),m.adj.toFixed(2),m.net.toFixed(2)].map(cell).join(",")); }
-  const t=totals(workerList()); L.push(["TOTAL","","","","",t.normal,"","","","",t.gross.toFixed(2),t.adj.toFixed(2),t.net.toFixed(2)].map(cell).join(","));
+  const L=[["Worker","Days","Sites","Base rate per hr","Normal hrs",`OT ${st.ot15}x hrs`,`RD/PH ${st.ot20}x hrs`,"Normal pay","OT pay","Gross","Adjustment","Net pay"].map(cell).join(",")];
+  for(const w of workerList()){ const m=monthOf(w.id); L.push([w.name,m.days,m.siteCount,m.base.toFixed(2),m.normal,m.ot15,m.ot20,m.normalPay.toFixed(2),m.otPay.toFixed(2),m.gross.toFixed(2),m.adj.toFixed(2),m.net.toFixed(2)].map(cell).join(",")); }
+  const t=totals(workerList()); L.push(["TOTAL","","","",t.normal,"","","","",t.gross.toFixed(2),t.adj.toFixed(2),t.net.toFixed(2)].map(cell).join(","));
   return L.join("\n"); }
-function dailyCsv(){ const [y,mo]=ym(S.monthKey); const L=[["Date","Day","Worker","Trade","Site","Rate per hr","Normal hrs","OT hrs","RD/PH hrs","Day pay"].map(cell).join(",")];
+function dailyCsv(){ const [y,mo]=ym(S.monthKey); const L=[["Date","Day","Worker","Site","Rate per hr","Normal hrs","OT hrs","RD/PH hrs","Day pay"].map(cell).join(",")];
   for(let d=1; d<=daysIn(S.monthKey); d++) for(const w of workerList()){ const r=dayRec(w.id,d); if(!dayHrs(r)&&!assigned(r)) continue;
-    L.push([`${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`,WD[wdOf(S.monthKey,d)],w.name,w.trade||"",siteName(r.s),rateFor(w.id,r.s).toFixed(2),r.n,r.o,r.h,dayPay(w.id,r).toFixed(2)].map(cell).join(",")); }
+    L.push([`${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`,WD[wdOf(S.monthKey,d)],w.name,siteName(r.s),rateFor(w.id,r.s).toFixed(2),r.n,r.o,r.h,dayPay(w.id,r).toFixed(2)].map(cell).join(",")); }
   return L.join("\n"); }
 function copyText(text,msg){ try{ navigator.clipboard.writeText(text).then(()=>toast(msg||"Copied."),()=>toast("Copy isn't available here. Select the text and copy it manually.")); }catch(e){ toast("Copy isn't available here."); } }
 
