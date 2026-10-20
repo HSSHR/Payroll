@@ -3,6 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script>
+/* ===== Supabase connection =====
+   Paste your project's URL and anon (public) key here. Find them in Supabase:
+   Project Settings -> API. Leave both empty to keep data in this browser only. */
+window.SUPABASE_CONFIG = {
+  url: "https://nakxxnrjmiwogakwulrl.supabase.co",
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ha3h4bnJqbWl3b2dha3d1bHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0NDY0ODYsImV4cCI6MjEwODAyMjQ4Nn0.7DfTwJEaWwVVSLorAAZuZrMmOpxwPXrHC71dtZDVyDk",
+  requireLogin: false  // true = managers must sign in (see README)
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <title>Site Payroll Board</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -217,6 +228,7 @@ dialog::backdrop{background:rgba(10,12,10,.45)}
     <span id="lockChip" class="chip draft">Draft</span>
     <button class="btn" id="lockBtn">Finalise month</button>
     <span class="saving" id="saving" aria-live="polite"></span>
+    <button class="btn" id="signOut" hidden>Sign out</button>
   </div>
   <div class="wrap">
     <nav class="tabs" role="tablist">
@@ -452,18 +464,115 @@ function syncSide(){
 }
 function monthDataFor(k){ return k===S.monthKey ? S.month : (S.side.key===k ? S.side.data : null); }
 
-async function start(){
-  render();
-  let db=null,user=null;
-  try{ [db,user] = await Promise.all([window.claude?.use?.("db") ?? null, window.claude?.use?.("user") ?? null]); }catch(e){}
-  if(!db){ const saved=lsGet(); if(saved===undefined || (window.claude && !saved)) { startMemory(); return; } startLocal(saved); return; }
-  S.mode="live";
-  S.db=db; S.live=true;
-  try{ if(user){ const w=await user.can("data.write"); if(w===false) S.canWrite=false; } }catch(e){}
+/* ---------- Supabase mode (standalone page shared by several managers) ---------- */
+const SUPA = (typeof window!=="undefined" && window.SUPABASE_CONFIG) || {};
+const supaReady = () => !!(SUPA.url && SUPA.anonKey && window.supabase && window.supabase.createClient);
+const openAccess = () => S.mode==="supabase" && !SUPA.requireLogin;
+function supaErr(error){ const c=String(error&&error.code||""); return {code: c==="42501"||c==="PGRST301"||/permission|policy|JWT/i.test(error&&error.message||"") ? "invalid_argument" : "unavailable", message:error&&error.message||"Supabase error"}; }
+function supaDb(sb){
+  const colSubs={}, docSubs={};
+  const snapDoc=(id,data)=>({id, exists:data!=null, data:()=>data==null?undefined:data, metadata:{fromCache:false,hasPendingWrites:false}});
+  function emitCol(c){ const s=colSubs[c]; if(!s) return; const docs=[...s.rows.entries()].sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0).map(([id,d])=>snapDoc(id,d)); const q={docs,size:docs.length,empty:!docs.length,docChanges:()=>[],metadata:{fromCache:false,hasPendingWrites:false}}; s.cbs.forEach(cb=>{try{cb(q)}catch(e){console.error(e)}}); }
+  function emitDoc(c,id,data){ const s=docSubs[c+"/"+id]; if(!s) return; s.data=data; s.cbs.forEach(cb=>{try{cb(snapDoc(id,data))}catch(e){console.error(e)}}); }
+  function apply(c,id,data){ if(colSubs[c]){ if(data==null) colSubs[c].rows.delete(id); else colSubs[c].rows.set(id,data); emitCol(c); } emitDoc(c,id,data); }
+  async function fetchCol(c){ const {data,error}=await sb.from("docs").select("id,data").eq("collection",c).limit(5000); if(error) throw supaErr(error); return data||[]; }
+  async function fetchDoc(c,id){ const {data,error}=await sb.from("docs").select("data").eq("collection",c).eq("id",id).maybeSingle(); if(error) throw supaErr(error); return data?data.data:null; }
+  async function refreshAll(){
+    for(const c of Object.keys(colSubs)){ try{ const rows=await fetchCol(c); colSubs[c].rows=new Map(rows.map(r=>[r.id,r.data])); emitCol(c); }catch(e){} }
+    for(const k of Object.keys(docSubs)){ const i=k.indexOf("/"); const c=k.slice(0,i), id=k.slice(i+1); try{ emitDoc(c,id,await fetchDoc(c,id)); }catch(e){} }
+  }
+  sb.channel("docs-changes").on("postgres_changes",{event:"*",schema:"public",table:"docs"},p=>{
+    if(p.eventType==="DELETE"){ if(p.old&&p.old.collection) apply(p.old.collection,p.old.id,null); else refreshAll(); }
+    else if(p.new) apply(p.new.collection,p.new.id,p.new.data);
+  }).subscribe(status=>{ if(status==="SUBSCRIBED") refreshAll(); });
+  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") refreshAll(); });
+  setInterval(refreshAll, 60000);
+  function docRef(c,id){ return {
+    id, path:c+"/"+id,
+    async get(){ return snapDoc(id, await fetchDoc(c,id)); },
+    async set(data){ const {error}=await sb.from("docs").upsert({collection:c,id,data,updated_at:new Date().toISOString()}); if(error) throw supaErr(error); },
+    async update(patch){ const {error}=await sb.rpc("merge_doc",{p_collection:c,p_id:id,p_patch:patch}); if(error) throw supaErr(error); },
+    async delete(){ const {error}=await sb.from("docs").delete().eq("collection",c).eq("id",id); if(error) throw supaErr(error); },
+    onSnapshot(cb,err){ const k=c+"/"+id; const s=docSubs[k]||(docSubs[k]={cbs:new Set(),data:undefined}); s.cbs.add(cb);
+      fetchDoc(c,id).then(d=>emitDoc(c,id,d)).catch(e=>err&&err(e));
+      return ()=>{ s.cbs.delete(cb); if(!s.cbs.size) delete docSubs[k]; }; } }; }
+  return {
+    doc(path){ const i=path.lastIndexOf("/"); return docRef(path.slice(0,i), path.slice(i+1)); },
+    collection(c){ return {
+      path:c, doc:id=>docRef(c,id),
+      async get(){ const rows=await fetchCol(c); const docs=rows.map(r=>snapDoc(r.id,r.data)); return {docs,size:docs.length,empty:!docs.length}; },
+      onSnapshot(cb,err){ const s=colSubs[c]||(colSubs[c]={cbs:new Set(),rows:new Map()}); s.cbs.add(cb);
+        fetchCol(c).then(rows=>{ s.rows=new Map(rows.map(r=>[r.id,r.data])); emitCol(c); }).catch(e=>err&&err(e));
+        return ()=>{ s.cbs.delete(cb); if(!s.cbs.size) delete colSubs[c]; }; } }; },
+    refreshAll
+  };
+}
+async function startSupabase(){
+  S.mode="supabase"; S.live=false;
+  const sb=window.supabase.createClient(SUPA.url, SUPA.anonKey, {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+  S.sb=sb;
+  sb.auth.onAuthStateChange((ev,sess)=>{
+    if(ev==="PASSWORD_RECOVERY"){ S.auth={view:"newpw"}; render(); return; }
+    if(!SUPA.requireLogin) return;
+    if(sess && !S.live){ S.auth=null; connectSupabase(sess); }
+    if(ev==="SIGNED_OUT"){ location.reload(); }
+  });
+  if(!SUPA.requireLogin){ connectSupabase(null); return; }
+  let session=null; try{ ({data:{session}} = await sb.auth.getSession()); }catch(e){}
+  if(session) connectSupabase(session); else { if(!S.auth) S.auth={view:"login"}; render(); }
+}
+function connectSupabase(session){
+  if(S.live) return;
+  S.user=session?session.user:null; S.db=supaDb(S.sb); S.live=true; S.canWrite=true; S.auth=null;
+  wireDb(S.db);
+}
+function wireDb(db){
   db.collection("workers").onSnapshot(s=>{const o={};s.docs.forEach(d=>o[d.id]=d.data());S.workers=o;S.loaded.workers=true;render()},()=>toast("Lost connection to the worker list. Reload to reconnect."));
   db.collection("sites").onSnapshot(s=>{const o={};s.docs.forEach(d=>o[d.id]=d.data());S.sites=o;S.loaded.sites=true;render()},()=>toast("Lost connection to the site list. Reload to reconnect."));
   db.collection("settings").doc("main").onSnapshot(s=>{S.settings={...DEFAULT_SETTINGS,...(s.exists?s.data():{})};S.settingsExists=s.exists;S.loaded.settings=true;render()},()=>{});
-  subscribeMonth(); setSaving();
+  subscribeMonth(); setSaving(); render();
+}
+function authView(){
+  const a=S.auth||{view:"login"}, msg=a.msg?`<p class="${a.err?"del":"wtrade"}" style="margin:0">${esc(a.msg)}</p>`:"";
+  if(a.view==="newpw") return `<div class="panel" style="max-width:420px;margin:24px auto"><div class="panel-head"><h2>Set a new password</h2></div>
+    <form class="settings" id="newPwForm"><label for="npw">New password<input type="password" id="npw" autocomplete="new-password" minlength="8" required></label>${msg}<button class="btn primary" type="submit">Save password</button></form></div>`;
+  return `<div class="panel" style="max-width:420px;margin:24px auto"><div class="panel-head"><h2>Sign in</h2><p>Use the account your administrator created for you in Supabase.</p></div>
+    <form class="settings" id="loginForm">
+      <label for="lgEmail">Email<input type="email" id="lgEmail" autocomplete="username" required value="${esc(a.email||"")}"></label>
+      <label for="lgPw">Password<input type="password" id="lgPw" autocomplete="current-password" required></label>
+      ${msg}
+      <div class="toolbar"><button class="btn primary" type="submit"${a.busy?" disabled":""}>${a.busy?"Signing in…":"Sign in"}</button><button class="linkbtn" type="button" id="forgotPw">Forgot password?</button></div>
+    </form></div>`;
+}
+document.addEventListener("submit", async e=>{
+  const f=e.target; if(f.id!=="loginForm" && f.id!=="newPwForm") return; e.preventDefault(); if(!S.sb) return;
+  if(f.id==="loginForm"){ const email=$("#lgEmail").value.trim(), password=$("#lgPw").value;
+    S.auth={view:"login",email,busy:true}; render();
+    const {error}=await S.sb.auth.signInWithPassword({email,password});
+    if(error){ S.auth={view:"login",email,msg:"Wrong email or password. Try again, or reset your password.",err:true}; render(); } }
+  else { const password=$("#npw").value; const {error}=await S.sb.auth.updateUser({password});
+    if(error){ S.auth={view:"newpw",msg:error.message,err:true}; render(); } else { toast("Password saved."); S.auth=null; const {data:{session}}=await S.sb.auth.getSession(); if(session) connectSupabase(session); else { S.auth={view:"login"}; render(); } } }
+});
+async function supaRestore(o){
+  const rows=[]; const push=(c,obj)=>Object.entries(obj||{}).forEach(([id,data])=>rows.push({collection:c,id,data}));
+  push("workers",o.workers); push("sites",o.sites); push("months",o.months); rows.push({collection:"settings",id:"main",data:{...DEFAULT_SETTINGS,...(o.settings||{}),sample:false}});
+  const del=await S.sb.from("docs").delete().neq("collection","");
+  if(del.error) throw supaErr(del.error);
+  for(let i=0;i<rows.length;i+=200){ const {error}=await S.sb.from("docs").insert(rows.slice(i,i+200)); if(error) throw supaErr(error); }
+  await S.db.refreshAll();
+}
+
+async function start(){
+  render();
+  let db=null,user=null;
+  if(window.claude){ try{ [db,user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]); }catch(e){} }
+  if(db){
+    S.mode="live"; S.db=db; S.live=true;
+    try{ if(user){ const w=await user.can("data.write"); if(w===false) S.canWrite=false; } }catch(e){}
+    wireDb(db); return;
+  }
+  if(supaReady()){ startSupabase(); return; }
+  const saved=lsGet(); if(saved===undefined || (window.claude && !saved)) { startMemory(); return; } startLocal(saved);
 }
 function startLocal(saved){ // standalone (e.g. GitHub Pages): data lives in this browser's storage
   S.mode="local"; S.live=false; saved=saved||{};
@@ -518,6 +627,9 @@ setInterval(()=>{ renderDue(); }, 30000);
 /* ---------- render shell ---------- */
 const isReady = () => S.loaded.workers && S.loaded.sites && S.loaded.settings;
 function render(){
+  const so=$("#signOut"); if(so){ so.hidden=!(S.mode==="supabase"&&S.live&&SUPA.requireLogin); if(S.user) so.title="Signed in as "+(S.user.email||""); }
+  if(S.mode==="supabase" && S.auth){ TABS.forEach(t=>{$("#view-"+t).hidden=true}); $("#dueBox").innerHTML=""; $("#noticeBox").innerHTML=authView(); document.querySelector("nav.tabs").hidden=true; return; }
+  document.querySelector("nav.tabs").hidden=false;
   $("#companyName").textContent = S.settings.company || "Site Payroll Board";
   $("#monthLabel").textContent = labelOf(S.monthKey);
   const lk=locked(); const chip=$("#lockChip"); chip.className="chip "+(lk?"ok":"draft"); chip.textContent=lk?"Finalised":"Draft";
@@ -527,7 +639,7 @@ function render(){
   renderDue();
   let notice="";
   if(isReady() && S.settings.sample) notice=`<div class="notice"><p><strong>Sample roster loaded.</strong> The 22 workers, 15 sites, site pay rules and October hours are examples. Replace them in <em>Workers &amp; sites</em>.</p>${S.canWrite?'<button class="btn" id="dismissSample">Hide this notice</button>':''}</div>`;
-  else if(S.mode==="local" && isReady() && !S.settings.localNoticeHidden) notice=`<div class="notice"><p><strong>Saved in this browser.</strong> Your roster is stored on this device and browser only. Download a backup regularly from <em>Pay rules</em>, and use it to move data to another computer.</p><button class="btn" id="hideLocalNotice">Got it</button></div>`;
+  else if(S.mode==="local" && isReady() && !S.settings.localNoticeHidden) notice=`<div class="notice"><p><strong>Saved in this browser.</strong> Your roster is stored on this device and browser only. Download a backup regularly from <em>Pay rules</em>. To share one roster between managers, connect Supabase (see the README).</p><button class="btn" id="hideLocalNotice">Got it</button></div>`;
   else if(S.mode==="memory" && isReady()) notice=`<div class="notice"><p><strong>Preview.</strong> Placeholder workers and sites are shown so you can see the layout. Changes here are not saved.</p></div>`;
   else if(S.live && !S.canWrite) notice=`<div class="notice"><p>You can view this payroll. Ask the owner for Contributor access to make changes.</p></div>`;
   if(locked() && isReady()) notice+=`<div class="notice" style="margin-top:${notice?"10px":"0"}"><p><strong>${esc(labelOf(S.monthKey))} is finalised.</strong> Hours, rates and site pay are locked. Reopen the month to make corrections.</p></div>`;
@@ -782,9 +894,9 @@ function renderSettings(){
   <div class="panel" style="margin-top:18px"><div class="panel-head"><h2>Backup &amp; restore</h2><p>Download everything (workers, sites, rates, every month's roster) as one file. Restore it on another computer or in the standalone version.</p></div>
     <div class="settings" style="max-width:none">
       <div class="toolbar"><button class="btn primary" id="backupBtn">Download backup</button>
-      ${S.mode==="local"?`<label class="btn" for="restoreFile" style="display:inline-flex;align-items:center">Restore from backup…<input type="file" id="restoreFile" accept=".json,application/json" hidden></label>`:""}</div>
+      ${S.mode==="local"||S.mode==="supabase"?`<label class="btn" for="restoreFile" style="display:inline-flex;align-items:center">Restore from backup…<input type="file" id="restoreFile" accept=".json,application/json" hidden></label>`:""}</div>
       <div id="restoreBox"></div>
-      ${S.mode==="local"?'<span class="hint">Restoring replaces everything currently stored in this browser.</span>':'<span class="hint">To restore a backup, open the standalone version of this page (for example on GitHub Pages) and restore it there.</span>'}
+      ${S.mode==="supabase"?'<span class="hint">Restoring replaces everything in the shared database, for every manager.</span>':S.mode==="local"?'<span class="hint">Restoring replaces everything currently stored in this browser.</span>':'<span class="hint">To restore a backup, open the standalone version of this page (for example on GitHub Pages) and restore it there.</span>'}
     </div></div>`;
 }
 async function buildBackup(){
@@ -796,7 +908,7 @@ async function buildBackup(){
 let pendingRestore=null;
 function showRestore(obj){ pendingRestore=obj; const box=$("#restoreBox"); if(!box) return;
   const nW=Object.keys(obj.workers||{}).length, nS=Object.keys(obj.sites||{}).length, nM=Object.keys(obj.months||{}).length;
-  box.innerHTML=`<div class="notice"><p>Backup from ${esc(obj.exported?new Date(obj.exported).toLocaleString("en-SG"):"unknown date")}: ${nW} workers, ${nS} sites, ${nM} month${nM===1?"":"s"}. Replace what's in this browser?</p><button class="btn primary" id="restoreGo">Replace with backup</button><button class="btn" id="restoreCancel">Cancel</button></div>`; }
+  box.innerHTML=`<div class="notice"><p>Backup from ${esc(obj.exported?new Date(obj.exported).toLocaleString("en-SG"):"unknown date")}: ${nW} workers, ${nS} sites, ${nM} month${nM===1?"":"s"}. ${S.mode==="supabase"?"Replace the shared data for every manager?":"Replace what's in this browser?"}</p><button class="btn primary" id="restoreGo">Replace with backup</button><button class="btn" id="restoreCancel">Cancel</button></div>`; }
 
 /* ---------- export ---------- */
 const EX = {period:"month", month:"", year:0, site:"all", report:"worker", cache:{}, loading:false, result:null, err:""};
@@ -1003,8 +1115,8 @@ function renderProfiles(){
             <label for="pf-rate">Base rate per hour<input type="number" min="0" step="0.5" id="pf-rate" data-wid="${id}" data-k="rate" value="${w.rate??""}"${dis}></label>
             <label for="pf-siteId">Usual site<select id="pf-siteId" data-wid="${id}" data-k="siteId"${dis}>${siteOptions(isSite(w.siteId)?w.siteId:"",{none:"— None —",off:false})}</select></label>
             ${f("phone","Phone","tel")}${f("nationality","Nationality")}
-            ${f("idNo","FIN / work permit no.")}${f("permitExpiry","Work permit expiry","date")}
-            ${f("joined","Date joined","date")}${f("bank","Bank account / PayNow")}
+            ${openAccess()?"":f("idNo","FIN / work permit no.")}${f("permitExpiry","Work permit expiry","date")}
+            ${f("joined","Date joined","date")}${openAccess()?"":f("bank","Bank account / PayNow")}
             ${f("emergency","Emergency contact")}
             <label class="check" for="pf-active" style="align-self:center"><input type="checkbox" id="pf-active" data-wid="${id}" data-k="active"${w.active!==false?" checked":""}${dis}> <span>Active (shows on the roster)</span></label>
             <label for="pf-notes" style="grid-column:1/-1">Notes<textarea id="pf-notes" data-wid="${id}" data-k="notes" rows="3" style="font:inherit;background:var(--surface);color:var(--fg);border:1px solid var(--line-strong);border-radius:var(--r);padding:8px"${dis}>${esc(w.notes||"")}</textarea></label>
@@ -1101,6 +1213,11 @@ document.addEventListener("click", e=>{
   if(b.id==="hideLocalNotice"){ S.settings.localNoticeHidden=true; persist(); render(); return; }
   if(b.id==="backupBtn"){ (async()=>{ try{ const data=await buildBackup(); const d=new Date(); saveCsv(`site-payroll-backup-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.json`, data, "application/json"); }catch(e){ toast("Couldn't build the backup. Try again."); } })(); return; }
   if(b.id==="restoreCancel"){ pendingRestore=null; $("#restoreBox").innerHTML=""; return; }
+  if(b.id==="restoreGo" && pendingRestore && S.mode==="supabase"){ const o=pendingRestore; pendingRestore=null; b.disabled=true; b.textContent="Restoring…";
+    supaRestore(o).then(()=>{ toast("Backup restored to the shared database."); $("#restoreBox").innerHTML=""; }).catch(e=>{ toast("Restore failed: "+(e.message||"try again")+"."); b.disabled=false; b.textContent="Replace with backup"; }); return; }
+  if(b.id==="signOut" && S.sb){ S.sb.auth.signOut(); return; }
+  if(b.id==="forgotPw" && S.sb){ const email=($("#lgEmail")||{}).value||""; if(!email.trim()){ S.auth={view:"login",msg:"Type your email first, then tap Forgot password.",err:true}; render(); return; }
+    S.sb.auth.resetPasswordForEmail(email.trim(),{redirectTo:location.origin+location.pathname}).then(({error})=>{ S.auth={view:"login",email,msg:error?error.message:"Check your email for a link to set a new password.",err:!!error}; render(); }); return; }
   if(b.id==="restoreGo" && pendingRestore && S.mode==="local"){ const o=pendingRestore; pendingRestore=null;
     S.settings={...DEFAULT_SETTINGS,...(o.settings||{}),sample:false}; S.workers=o.workers||{}; S.sites=o.sites||{}; S.memMonths=o.months||{}; S.month=S.memMonths[S.monthKey]||null;
     persistNow(); subscribeMonth(); render(); toast("Backup restored."); return; }
