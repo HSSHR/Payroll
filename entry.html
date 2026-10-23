@@ -15,7 +15,7 @@ window.SUPABASE_CONFIG = {
 window.APP_ROLE = "entry";  // data entry link: no pay, roster view-only
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<meta name="app-version" content="20261020091049">
+<meta name="app-version" content="20261023030547">
 <title>Hong Soon Seng Roster Entry</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23e0a100%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Arial%27 font-weight=%27700%27 font-size=%2716%27 text-anchor=%27middle%27 fill=%27%232a2000%27%3ESP%3C/text%3E%3C/svg%3E">
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -289,6 +289,7 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const TABS = ["roster","grid","payroll","sites","profiles","team","settings"];
 const OFF = "off";
+const HL = "hl";  // home leave (unpaid)
 const DUE_HOUR = 18;
 const COMPANY = "Hong Soon Seng Construction & Trading Pte Ltd";
 const DEFAULT_SETTINGS = {company:COMPANY, currency:"S$", ot15:1.5, ot20:2.0, otLimit:72, dayHours:8, workWeek:6, dayBasis:"fixed26", autoFill:true, skipSun:true, sample:false};
@@ -335,8 +336,8 @@ const workerList = () => allWorkers().filter(w=>w.active!==false);
 const wl = w => String((w&&w.name)||"") + (w&&w.empId ? " ("+w.empId+")" : "");
 const siteList = () => Object.entries(S.sites).map(([id,s])=>({id,...s})).sort(byOrder);
 const isSite = id => !!(id && id!==OFF && S.sites[id]);
-const siteName = id => id===OFF ? "Off" : isSite(id) ? S.sites[id].name : "";
-const siteCode = id => { if(id===OFF) return "OFF"; if(!isSite(id)) return "?"; const s=S.sites[id]; if(s.location) return String(s.location).slice(0,7);
+const siteName = id => id===HL ? "Home leave" : id===OFF ? "Off" : isSite(id) ? S.sites[id].name : "";
+const siteCode = id => { if(id===HL) return "HL"; if(id===OFF) return "OFF"; if(!isSite(id)) return "?"; const s=S.sites[id]; if(s.location) return String(s.location).slice(0,7);
   return String(s.name).split(/\s+/).map(x=>x[0]).join("").slice(0,4).toUpperCase(); };
 function payRuleText(s){ const v=num(s.payValue); if(s.payMode==="fixed") return `${cur()} ${v.toFixed(2)}/hr flat`; if(s.payMode==="plus") return `base +${v.toFixed(2)}/hr`; return "worker's base rate"; }
 
@@ -347,10 +348,14 @@ const ENTRY_TABS = ["roster","grid","profiles","team"];
 const editable = () => S.canWrite && !locked() && !IS_ENTRY;
 function entryIn(md,wid){ return (md && md.entries && md.entries[wid]) || {}; }
 function entry(wid){ return entryIn(S.month,wid); }
-function recIn(md,wid,d){ const r=(entryIn(md,wid).days||{})[d]; return r ? {s:r.s||"", n:num(r.n), o:num(r.o), h:num(r.h), set:true} : {s:"",n:0,o:0,h:0,set:false}; }
+const sid0 = el => el.value;
+const isoOf = (key,d) => key+"-"+String(d).padStart(2,"0");
+const isoToday = () => { const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; };
+function leaveOn(wid,iso){ return ((S.workers[wid]||{}).homeLeave||[]).find(p=>p.from<=iso && iso<=p.to) || null; }
+function recIn(md,wid,d,key){ key=key||(md&&md.month)||S.monthKey; if(leaveOn(wid,isoOf(key,d))) return {s:HL,n:0,o:0,h:0,set:true,leave:true}; const r=(entryIn(md,wid).days||{})[d]; return r ? {s:r.s||"", n:num(r.n), o:num(r.o), h:num(r.h), set:true} : {s:"",n:0,o:0,h:0,set:false}; }
 const dayRec = (wid,d) => recIn(S.month,wid,d);
 const dayHrs = r => r.n+r.o+r.h;
-const assigned = r => r.s===OFF || isSite(r.s);
+const assigned = r => r.s===OFF || r.s===HL || isSite(r.s);
 function baseRate(wid){ const fz=S.month&&S.month.frozen; if(locked()&&fz&&fz.w&&fz.w[wid]!==undefined) return num(fz.w[wid]); return num((S.workers[wid]||{}).rate); }
 function siteRule(sid){ const fz=S.month&&S.month.frozen; if(locked()&&fz&&fz.s&&fz.s[sid]) return fz.s[sid]; return S.sites[sid]||{}; }
 function customRate(wid,sid){ const fz=S.month&&S.month.frozen; const src = locked()&&fz&&fz.ws ? (fz.ws[wid]||{}) : ((S.workers[wid]||{}).siteRates||{});
@@ -367,8 +372,9 @@ function workingDaysIn(key){ let c=0; for(let d=1; d<=daysIn(key); d++) if(isWor
 const salaryDivisor = key => S.settings.dayBasis==="calendar" ? workingDaysIn(key) : 26;
 function salaryInfo(wid){ const key=S.monthKey, WD=workingDaysIn(key), div=salaryDivisor(key), sal=salaryOf(wid), daily=sal/div, t=new Date(), cur=keyOf(t);
   const lastPast = key<cur ? daysIn(key) : key===cur ? t.getDate()-1 : 0;
-  let missed=0; for(let d=1; d<=lastPast; d++){ if(!isWorkingDay(key,d)) continue; const r=dayRec(wid,d); if(r.n+r.o+r.h<=0) missed++; }
-  return {sal, WD, div, daily, missed, worked:WD-missed, pay:Math.max(0,sal-missed*daily), hr:monthlyHr(wid), toDate:key===cur}; }
+  let missed=0, leave=0; for(let d=1; d<=daysIn(key); d++){ if(!isWorkingDay(key,d)) continue; const r=dayRec(wid,d);
+    if(r.s===HL){ missed++; leave++; continue; } if(d<=lastPast && r.n+r.o+r.h<=0) missed++; }
+  return {sal, WD, div, daily, missed, leave, worked:WD-missed, pay:Math.max(0,sal-missed*daily), hr:monthlyHr(wid), toDate:key===cur}; }
 function dayParts(wid,r,d){ const st=S.settings, key=S.monthKey;
   if(isMonthly(wid)){ const hr=monthlyHr(wid), work=isWorkingDay(key,d), any=(r.n+r.o+r.h)>0;
     const np = work && any ? salaryOf(wid)/salaryDivisor(key) : 0;
@@ -382,8 +388,8 @@ const rateLabel = w => w.payType==="monthly" ? `Salary ${fmt0(num(w.salary))}/mo
 function monthOf(wid){
   const st=S.settings, N=daysIn(S.monthKey);
   const mon=isMonthly(wid);
-  const m={monthly:mon, base:mon?salaryOf(wid):baseRate(wid), normal:0, ot15:0, ot20:0, days:0, noSiteDays:0, bySite:{}, adj:num(entry(wid).adj), normalPay:0, ot15Pay:0, ot20Pay:0};
-  for(let d=1; d<=N; d++){ const r=dayRec(wid,d); const h=dayHrs(r); if(!h) continue;
+  const m={monthly:mon, leaveDays:0, base:mon?salaryOf(wid):baseRate(wid), normal:0, ot15:0, ot20:0, days:0, noSiteDays:0, bySite:{}, adj:num(entry(wid).adj), normalPay:0, ot15Pay:0, ot20Pay:0};
+  for(let d=1; d<=N; d++){ const r=dayRec(wid,d); if(r.s===HL){ m.leaveDays++; continue; } const h=dayHrs(r); if(!h) continue;
     m.days++; if(!isSite(r.s)) m.noSiteDays++;
     const p=dayParts(wid,r,d), rt=p.rt;
     m.normal+=r.n-p.rdExtra; m.ot15+=r.o; m.ot20+=r.h+p.rdExtra;
@@ -652,7 +658,7 @@ function renderDue(){
   const md=monthDataFor(t.key); const ws=workerList();
   if(!ws.length||!siteList().length){ box.innerHTML=""; return; }
   const loaded = t.key===S.monthKey ? S.loaded.month : (S.live ? S.side.data!==null || S.side.unsub!==null : true);
-  const missing = ws.filter(w=>!assigned(recIn(md,w.id,t.day)));
+  const missing = ws.filter(w=>!assigned(recIn(md,w.id,t.day,t.key)));
   const clock=t.now.toLocaleTimeString("en-SG",{hour:"numeric",minute:"2-digit"});
   const viewing = S.tab==="roster" && S.monthKey===t.key && S.day===t.day;
   const label = shortDay(t.key,t.day);
@@ -702,7 +708,7 @@ function render(){
 function captureFocus(){ const a=document.activeElement; if(!a||!a.id||a===document.body) return null; return {id:a.id,val:a.value,s:a.selectionStart,e:a.selectionEnd,typing:a.tagName==="INPUT"}; }
 function restoreFocus(f){ if(!f) return; const el=document.getElementById(f.id); if(!el) return; if(f.typing&&el.tagName==="INPUT"&&el.type!=="checkbox"&&!f.noKeep) el.value=f.val; el.focus({preventScroll:true}); try{ if(f.s!=null) el.setSelectionRange(f.s,f.e) }catch(e){} }
 function siteOptions(sel,opts){ opts=opts||{}; let h=`<option value=""${!sel?" selected":""}>${esc(opts.none||"— Choose site —")}</option>`;
-  if(opts.off!==false) h+=`<option value="${OFF}"${sel===OFF?" selected":""}>Off / rest day</option>`;
+  if(opts.off!==false){ h+=`<option value="${OFF}"${sel===OFF?" selected":""}>Off / rest day</option>`; if(!opts.noLeave) h+=`<option value="${HL}">Home leave…</option>`; }
   for(const s of siteList()){ const done=s.status==="completed"; if(done && s.id!==sel) continue; h+=`<option value="${esc(s.id)}"${s.id===sel?" selected":""}>${esc(s.name)}${done?" (completed)":""}</option>`; } return h; }
 function emptySetup(){ return `<div class="panel"><div class="empty"><h3>No workers or sites yet</h3><p>Set up your crew and project sites to start the daily roster. You can rename everyone afterwards.</p>
   ${S.canWrite?'<button class="btn primary" id="quickSetup">Create 22 workers and 15 sites</button><button class="linkbtn" data-go="profiles">Or add workers one by one</button>':''}${S.mode==="local"?'<button class="linkbtn" data-go="settings">Restore from a backup file</button>':''}</div></div>`; }
@@ -710,6 +716,7 @@ function siteFilterOptions(val){ return `<option value="all"${val==="all"?" sele
 
 /* ---------- daily roster ---------- */
 function statusChip(r){ const h=dayHrs(r);
+  if(r.s===HL) return `<span class="chip info">Home leave</span>`;
   if(r.s===OFF) return `<span class="wtrade">Off</span>`;
   if(h>0&&!isSite(r.s)) return `<span class="chip warn">No site</span>`;
   if(isSite(r.s)&&!h) return `<span class="chip info">No hours</span>`;
@@ -741,11 +748,11 @@ function renderRoster(){
     ft.n+=r.n; ft.o+=r.o; ft.h+=r.h; ft.pay+=pay;
     const id=esc(w.id), selVal = r.s===OFF?OFF : isSite(r.s)?r.s:"";
     const mw=isMonthly(w.id), rt = mw ? monthlyHr(w.id) : isSite(r.s) ? rateFor(w.id,r.s) : baseRate(w.id);
-    const hd = r.s===OFF?" disabled":dis;
+    const hd = (r.s===OFF||r.s===HL)?" disabled":dis; const lv = r.s===HL ? leaveOn(w.id,isoOf(S.monthKey,d)) : null;
     body+=`<tr>
       <td><input type="checkbox" class="sel" id="sel-${id}" data-w="${id}" aria-label="Select ${esc(wl(w))}"${S.selected.has(w.id)?" checked":""}${dis}></td>
       <td><button class="linkname" data-profile="${id}">${esc(wl(w))}</button><span class="wtrade pay">${esc(rateLabel(w))}</span></td>
-      <td><div class="sitecell"><select class="site${selVal?"":" none"}" id="site-${id}" data-w="${id}" aria-label="Site for ${esc(wl(w))}"${dis}>${siteOptions(selVal)}</select><span id="runwrap-${id}">${runCell(w.id,d,dis)}</span></div></td>
+      <td><div class="sitecell">${lv?`<span><strong>Home leave</strong> <span class="wtrade">${esc(fmtDate(lv.from))} – ${esc(fmtDate(lv.to))}</span></span><button class="linkbtn" data-profile="${id}" style="justify-self:start">Change in profile</button>`:`<select class="site${selVal?"":" none"}" id="site-${id}" data-w="${id}" aria-label="Site for ${esc(wl(w))}"${dis}>${siteOptions(selVal)}</select>`}<span id="runwrap-${id}">${runCell(w.id,d,dis)}</span></div></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="n-${id}" data-w="${id}" data-f="n" value="${r.n||""}" placeholder="0" aria-label="Normal hours"${hd}></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="o-${id}" data-w="${id}" data-f="o" value="${r.o||""}" placeholder="0" aria-label="Overtime hours"${hd}></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="h-${id}" data-w="${id}" data-f="h" value="${r.h||""}" placeholder="0" aria-label="Rest day or public holiday hours"${hd}></td>
@@ -774,7 +781,7 @@ function renderRoster(){
         <label class="field" for="fSite">Show <select id="fSite">${siteFilterOptions(S.filterSite)}</select></label>
         <input type="search" id="fSearch" placeholder="Search name or ID" value="${esc(S.search)}" aria-label="Search workers">
       </div>
-      ${sel&&ed?`<div class="bulk"><strong>${sel} selected</strong><label class="field" for="bulkSite">Send to <select id="bulkSite">${siteOptions("",{none:"— Choose —"})}</select></label>
+      ${sel&&ed?`<div class="bulk"><strong>${sel} selected</strong><label class="field" for="bulkSite">Send to <select id="bulkSite">${siteOptions("",{none:"— Choose —",noLeave:true})}</select></label>
         <label class="field" for="bulkDays">for <input type="number" id="bulkDays" min="1" max="${maxRun(d)}" value="1" style="width:56px"> day(s)</label>
         <button class="btn primary" id="bulkApply">Assign from ${d} ${mon3(S.monthKey)}</button><button class="btn" id="bulkClear">Clear selection</button></div>`:""}
     </div>
@@ -809,6 +816,7 @@ function renderGrid(){
     for(let d=1;d<=N;d++){ const r=dayRec(w.id,d), h=dayHrs(r);
       if(h>0){days++;tot+=h;perDay[d]++}
       if(!assigned(r) && !h){ row+=`<td><button class="cell${hl?" dim":""}" data-jump="${d}" aria-label="${esc(wl(w))}, ${d}: not assigned">·</button></td>`; continue; }
+      if(r.s===HL){ row+=`<td><button class="cell${hl?" dim":""}" data-jump="${d}" aria-label="${esc(wl(w))}, ${d}: home leave" style="color:var(--info);font-weight:600">HL</button></td>`; continue; }
       if(r.s===OFF){ row+=`<td><button class="cell${hl?" dim":""}" data-jump="${d}" aria-label="${esc(wl(w))}, ${d}: off" style="color:var(--muted)">off</button></td>`; continue; }
       const cls = h>0&&!isSite(r.s)?"noset": r.h>0?"ph":"on";
       const dim = hl && r.s!==hl ? " dim" : hl && r.s===hl ? " hl":"";
@@ -893,7 +901,7 @@ function renderPayrollMonth(){
   let body="", ft={d:0,n:0,o:0,h:0,gross:0,adj:0,net:0};
   for(const w of rows){ const m=monthOf(w.id); const id=esc(w.id);
     ft.d+=m.days; ft.n+=m.normal; ft.o+=m.ot15; ft.h+=m.ot20; ft.gross+=m.gross; ft.adj+=m.adj; ft.net+=m.net;
-    const status = m.noSiteDays?`<span class="chip warn" title="Days with hours but no site">${m.noSiteDays} day${m.noSiteDays>1?"s":""} no site</span>`: m.otHrs>lim?`<span class="chip warn" title="Over the ${lim}-hour monthly overtime limit">OT ${hrs(m.otHrs)}h</span>`: m.totalHrs===0?`<span class="chip info">No hours</span>`:`<span class="chip ok">OK</span>`;
+    const status = m.noSiteDays?`<span class="chip warn" title="Days with hours but no site">${m.noSiteDays} day${m.noSiteDays>1?"s":""} no site</span>`: m.otHrs>lim?`<span class="chip warn" title="Over the ${lim}-hour monthly overtime limit">OT ${hrs(m.otHrs)}h</span>`: m.leaveDays?`<span class="chip info">Home leave ${m.leaveDays}d</span>`: m.totalHrs===0?`<span class="chip info">No hours</span>`:`<span class="chip ok">OK</span>`;
     body+=`<tr><td><button class="linkname" data-profile="${id}">${esc(wl(w))}</button></td>
       <td class="num mono">${m.days}</td><td class="num mono">${m.siteCount}</td><td class="num mono">${m.monthly?fmt0(m.base)+"/mo":m.base.toFixed(2)+"/hr"}</td>
       <td class="num mono">${hrs(m.normal)}</td><td class="num mono">${hrs(m.ot15)}</td><td class="num mono">${hrs(m.ot20)}</td>
@@ -1293,6 +1301,18 @@ async function readImportFile(file){
   }catch(e){ toast(e.message||"Couldn't read that file."); }
 }
 
+function leavePanel(w,dis){
+  const id=esc(w.id), today=isoToday(), list=(w.homeLeave||[]);
+  const days=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/864e5)+1;
+  const rows=list.map((p,i)=>{ const st=p.to<today?'<span class="wtrade">Past</span>':p.from>today?'<span class="chip draft plain">Upcoming</span>':'<span class="chip info">On leave now</span>';
+    return `<tr><td class="mono">${esc(isoToDmy(p.from))}</td><td class="mono">${esc(isoToDmy(p.to))}</td><td class="num mono">${days(p.from,p.to)}</td><td>${st}</td><td>${dis?"":`<button class="linkbtn del" data-hlrm="${i}" data-hlw="${id}">Remove</button>`}</td></tr>`; }).join("");
+  return `<div class="panel"><div class="panel-head"><h2>Home leave</h2><p>Unpaid. Every day from the first to the last date shows as home leave on the roster, and the 6pm reminder skips them.</p></div>
+    ${list.length?`<div class="scroll"><table><thead><tr><th>From</th><th>To</th><th class="num">Days</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="wtrade" style="padding:12px 14px 0;margin:0">No home leave recorded.</p>'}
+    ${dis?"":`<div class="settings" style="max-width:none;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));align-items:end">
+      <label for="hl-from">Leave from<input type="text" inputmode="numeric" id="hl-from" data-date="hlFrom" placeholder="DD/MM/YYYY" maxlength="10" value="${esc(isoToDmy(PR.hlFrom||""))}"></label>
+      <label for="hl-to">Last day of leave<input type="text" inputmode="numeric" id="hl-to" data-date="hlTo" placeholder="DD/MM/YYYY" maxlength="10"></label>
+      <button class="btn primary" data-hladd="${id}">Add home leave</button></div>`}</div>`;
+}
 function renderProfiles(){
   const v=$("#view-profiles"); const ws=allWorkers();
   if(!ws.length){ v.innerHTML=emptySetup(); return; }
@@ -1300,16 +1320,16 @@ function renderProfiles(){
   const w={id:PR.wid,...S.workers[PR.wid]}; const ed=S.canWrite, dis=ed?"":" disabled"; const id=esc(w.id);
   const q=PR.q.trim().toLowerCase();
   const list=ws.filter(x=>!q||String(x.name).toLowerCase().includes(q)||String(x.empId||"").toLowerCase().includes(q)).map(x=>{ const ps=permitState(x);
-    return `<button class="plist${x.id===w.id?" on":""}" data-profile="${esc(x.id)}" aria-current="${x.id===w.id}"><span class="wname">${esc(wl(x))}</span><span class="wtrade"><span class="pay">${esc(rateLabel(x))}</span>${x.active===false?" · inactive":""}</span>${ps&&ps.cls==="warn"?`<span class="chip warn">${esc(ps.txt)}</span>`:""}</button>`; }).join("");
+    return `<button class="plist${x.id===w.id?" on":""}" data-profile="${esc(x.id)}" aria-current="${x.id===w.id}"><span class="wname">${esc(wl(x))}</span><span class="wtrade"><span class="pay">${esc(rateLabel(x))}</span>${x.active===false?" · inactive":""}${leaveOn(x.id,isoToday())?" · on home leave":""}</span>${ps&&ps.cls==="warn"?`<span class="chip warn">${esc(ps.txt)}</span>`:""}</button>`; }).join("");
   const expiring=ws.filter(x=>{const p=permitState(x); return p&&p.cls==="warn"&&x.active!==false}).length;
   // this month
   const m=monthOf(w.id), N=daysIn(S.monthKey), td=todayIn(S.monthKey);
   const first=wdOf(S.monthKey,1); let cal=WD.map(d=>`<span class="cal-h">${d.slice(0,2)}</span>`).join("");
   for(let i=0;i<first;i++) cal+=`<span></span>`;
   for(let d=1; d<=N; d++){ const r=dayRec(w.id,d), h=dayHrs(r);
-    const cls = r.s===OFF?"off": h>0&&!isSite(r.s)?"noset": isSite(r.s)? (r.h>0?"ph":"on") : "";
-    const tip = `${dayLabel(S.monthKey,d)} · ${r.s===OFF?"Off":isSite(r.s)?siteName(r.s):"Not assigned"}${h?` · ${hrs(h)} h · ${fmt(dayPay(w.id,r,d))}`:""}`;
-    cal+=`<button class="cal-d ${cls}${d===td?" today":""}" data-jump="${d}" title="${esc(tip)}" aria-label="${esc(tip)}"><span class="cn">${d}</span><span class="cs">${r.s===OFF?"off":isSite(r.s)?esc(siteCode(r.s)):""}</span></button>`; }
+    const cls = r.s===HL?"off": r.s===OFF?"off": h>0&&!isSite(r.s)?"noset": isSite(r.s)? (r.h>0?"ph":"on") : "";
+    const tip = `${dayLabel(S.monthKey,d)} · ${r.s===HL?"Home leave":r.s===OFF?"Off":isSite(r.s)?siteName(r.s):"Not assigned"}${h?` · ${hrs(h)} h · ${fmt(dayPay(w.id,r,d))}`:""}`;
+    cal+=`<button class="cal-d ${cls}${d===td?" today":""}" data-jump="${d}" title="${esc(tip)}" aria-label="${esc(tip)}"><span class="cn">${d}</span><span class="cs">${r.s===HL?"HL":r.s===OFF?"off":isSite(r.s)?esc(siteCode(r.s)):""}</span></button>`; }
   const bySite=Object.entries(m.bySite).sort((a,b)=>b[1].pay-a[1].pay).map(([sid,b])=>`<tr><td>${esc(sid?siteName(sid):"No site")}</td><td class="num mono">${b.days}</td><td class="num mono">${hrs(b.n+b.o+b.h)}</td><td class="num mono">${b.rate.toFixed(2)}</td><td class="num net">${fmt(b.pay)}</td></tr>`).join("");
   // rates per site
   const sr=w.siteRates||{};
@@ -1336,7 +1356,7 @@ function renderProfiles(){
       <div class="panel"><div class="phead">
         <div class="avatar" aria-hidden="true">${esc(String(w.name||"?").split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase())}</div>
         <div style="min-width:0;flex:1"><h2 style="font-size:28px">${esc(wl(w))}</h2><div class="wtrade pay" style="font-size:14px">${w.payType==="monthly"?"Monthly salary "+fmt(num(w.salary)):"Base rate "+fmt(num(w.rate))+"/hr"}</div>
-          <div class="quick" style="margin-top:8px">${w.active===false?'<span class="chip info">Inactive</span>':'<span class="chip ok">Active</span>'}${ps?`<span class="chip ${ps.cls}">${esc(ps.txt)}${w.permitExpiry?" · "+esc(fmtDate(w.permitExpiry)):""}</span>`:""}${w.joined?`<span class="chip plain" style="background:var(--sunk)">Joined ${esc(fmtDate(w.joined))}</span>`:""}</div></div>
+          <div class="quick" style="margin-top:8px">${w.active===false?'<span class="chip info">Inactive</span>':'<span class="chip ok">Active</span>'}${(()=>{ const lv=leaveOn(w.id,isoToday()); return lv?`<span class="chip info">On home leave until ${esc(fmtDate(lv.to))}</span>`:''; })()}${ps?`<span class="chip ${ps.cls}">${esc(ps.txt)}${w.permitExpiry?" · "+esc(fmtDate(w.permitExpiry)):""}</span>`:""}${w.joined?`<span class="chip plain" style="background:var(--sunk)">Joined ${esc(fmtDate(w.joined))}</span>`:""}</div></div>
         <div class="quick"><button class="btn primary pay" data-slip="${id}">${esc(mon3(S.monthKey))} payslip</button>${ed&&!IS_ENTRY?`<button class="btn del" data-delw="${id}">Remove worker</button>`:""}</div></div></div>
 
         <div class="panel"><div class="panel-head"><h2>Details</h2><p>Changes save as you leave each field.</p></div>
@@ -1369,6 +1389,7 @@ function renderProfiles(){
         <div class="panel pay"><div class="panel-head"><h2>Earnings ${ym(S.monthKey)[0]}</h2><p>Gross pay per month.</p></div>${ytd}</div>
       </div>
 
+        ${leavePanel(w,S.canWrite?"":" disabled")}
         <div class="panel pay"><div class="panel-head"><h2>Pay rate at each site</h2><p>Enter a rate to give ${esc(wl(w))} their own pay at that site. Leave empty for the default.</p></div>
           <div class="rates">${rates}</div></div>
     </div></div>`;
@@ -1388,6 +1409,7 @@ function openSlip(wid){
       ${m.monthly?`<tr><td>Monthly salary${m.salary.missed?` (less ${m.salary.missed} day${m.salary.missed>1?"s":""} not worked × ${fmt(m.salary.daily)})`:""}</td><td class="num mono">${fmt(m.salary.sal)}</td><td class="num mono">${fmt(m.normalPay)}</td></tr>`:`<tr><td>Normal hours</td><td class="num mono">${hrs(m.normal)} h</td><td class="num mono">${fmt(m.normalPay)}</td></tr>`}
       <tr><td>Overtime ${st.ot15}×</td><td class="num mono">${hrs(m.ot15)} h</td><td class="num mono">${fmt(m.ot15Pay)}</td></tr>
       <tr><td>Rest day / PH ${st.ot20}×</td><td class="num mono">${hrs(m.ot20)} h</td><td class="num mono">${fmt(m.ot20Pay)}</td></tr>
+      ${m.leaveDays?`<tr><td colspan="2">Home leave (unpaid)</td><td class="num mono">${m.leaveDays} day${m.leaveDays>1?"s":""}</td></tr>`:""}
       <tr><td colspan="2">Gross pay</td><td class="num mono">${fmt(m.gross)}</td></tr>
       <tr><td colspan="2">Adjustments</td><td class="num mono">${fmt(m.adj)}</td></tr>
       <tr class="total"><td colspan="2">Net pay</td><td class="num mono">${fmt(m.net)}</td></tr>
@@ -1476,6 +1498,13 @@ document.addEventListener("click", e=>{
     toast(done?`${siteName(id)} reopened. It's back in the roster.`:`${siteName(id)} marked completed. It no longer appears when assigning sites; its history stays in payroll and reports.`); render(); return; }
   if(b.id==="impCancel"){ IMP.rows=null; const d=$("#impDlg"); d.close?d.close():d.removeAttribute("open"); return; }
   if(b.id==="impGo"){ b.disabled=true; b.textContent="Importing…"; runImport(); return; }
+  if(b.dataset.hladd){ const wid=b.dataset.hladd, f=dmyToIso($("#hl-from").value), t2=dmyToIso($("#hl-to").value);
+    if(!f||!t2){ toast("Type both dates as DD/MM/YYYY."); return; } if(t2<f){ toast("The last day of leave must be on or after the first day."); return; }
+    const list=[...((S.workers[wid]||{}).homeLeave||[])]; if(list.some(p=>!(t2<p.from||f>p.to))){ toast("That overlaps home leave already recorded. Remove or change the other one first."); return; }
+    list.push({from:f,to:t2}); list.sort((a,b)=>a.from<b.from?-1:1); S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true);
+    PR.hlFrom=""; toast(`Home leave added: ${fmtDate(f)} to ${fmtDate(t2)} (unpaid).`); render(); return; }
+  if(b.dataset.hlrm!==undefined && b.dataset.hlw){ if(b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="Confirm remove"; setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent="Remove"}},3000); return; }
+    const wid=b.dataset.hlw, list=[...((S.workers[wid]||{}).homeLeave||[])]; list.splice(+b.dataset.hlrm,1); S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true); toast("Home leave removed."); render(); return; }
   if(b.dataset.pick){ const pk=document.getElementById("pk-"+b.dataset.pick); if(pk){ try{ pk.showPicker(); }catch(_){ pk.focus(); pk.click(); } } return; }
   if(b.dataset.profile){ openProfile(b.dataset.profile); return; }
   if(b.id==="addWP"){ const id=nextId("w",S.workers); S.workers[id]={name:"New worker",trade:"",rate:0,siteId:"",active:true,order:nextOrder(S.workers)}; saveDoc("workers",id,S.workers[id],false); openProfile(id); const el=document.getElementById("pf-name"); if(el){el.focus();el.select()} return; }
@@ -1491,6 +1520,7 @@ document.addEventListener("click", e=>{
   const d=S.day, ws=workerList();
   if(b.id==="copyPrev"){ if(d<2) return; const p={entries:{}}; let c=0;
     for(const w of ws){ if(assigned(dayRec(w.id,d))) continue; const r=dayRec(w.id,d-1); if(!assigned(r)) continue;
+      if(r.s===HL) continue;
       let rec = r.s===OFF ? {s:OFF,n:0,o:0,h:0} : recFor(w.id,d,r.s);
       p.entries[w.id]={days:{[d]:rec}}; c++; }
     if(!c){ toast(`Nothing to copy. Everyone is already assigned or nobody was rostered on ${d-1} ${mon3(S.monthKey)}.`); return; }
@@ -1525,6 +1555,7 @@ document.addEventListener("change", e=>{
   if(t.id==="hlSite"){ S.hlSite=t.value; render(); return; }
   if(t.classList.contains("sel")){ t.checked?S.selected.add(t.dataset.w):S.selected.delete(t.dataset.w); render(); return; }
   if(t.id==="selAll"){ document.querySelectorAll("#view-roster tbody input.sel").forEach(i=>{t.checked?S.selected.add(i.dataset.w):S.selected.delete(i.dataset.w)}); render(); return; }
+  if(t.matches("select.site") && sid0(t)===HL){ PR.hlFrom=isoOf(S.monthKey,S.day); openProfile(t.dataset.w); setTimeout(()=>{ const el=document.getElementById("hl-to"); if(el){ el.scrollIntoView({block:"center"}); el.focus(); } },50); return; }
   if(t.matches("select.site") && editable()){ const wid=t.dataset.w, sid=t.value, d=S.day, old=runInfo(wid,d);
     if(!sid) setDay(wid,d,null,true);
     else if(sid===OFF) setDay(wid,d,{s:OFF,n:0,o:0,h:0},true);
