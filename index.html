@@ -14,7 +14,7 @@ window.SUPABASE_CONFIG = {
 };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<meta name="app-version" content="20261023030946">
+<meta name="app-version" content="20261023031028">
 <title>Hong Soon Seng Payroll</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23e0a100%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Arial%27 font-weight=%27700%27 font-size=%2716%27 text-anchor=%27middle%27 fill=%27%232a2000%27%3ESP%3C/text%3E%3C/svg%3E">
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -751,7 +751,7 @@ function renderRoster(){
     body+=`<tr>
       <td><input type="checkbox" class="sel" id="sel-${id}" data-w="${id}" aria-label="Select ${esc(wl(w))}"${S.selected.has(w.id)?" checked":""}${dis}></td>
       <td><button class="linkname" data-profile="${id}">${esc(wl(w))}</button><span class="wtrade pay">${esc(rateLabel(w))}</span></td>
-      <td><div class="sitecell">${lv?`<span><strong>Home leave</strong> <span class="wtrade">${esc(fmtDate(lv.from))} – ${esc(fmtDate(lv.to))}</span></span><button class="linkbtn" data-profile="${id}" style="justify-self:start">Change in profile</button>`:`<select class="site${selVal?"":" none"}" id="site-${id}" data-w="${id}" aria-label="Site for ${esc(wl(w))}"${dis}>${siteOptions(selVal)}</select>`}<span id="runwrap-${id}">${runCell(w.id,d,dis)}</span></div></td>
+      <td><div class="sitecell">${lv?(editable()?`<strong>Home leave</strong><span class="run">from ${esc(fmtDate(lv.from))} for <input type="number" min="1" max="730" step="1" id="hlr-${id}" data-hlr="${id}" data-hlfrom="${esc(lv.from)}" value="${Math.round((new Date(lv.to+"T00:00:00")-new Date(lv.from+"T00:00:00"))/864e5)+1}" aria-label="Number of days of home leave"> days · back ${esc(fmtDate(addDaysIso(lv.to,1)))}</span><button class="linkbtn del" data-hlcancel="${id}" data-hlfrom="${esc(lv.from)}" style="justify-self:start">Cancel this leave</button>`:`<span><strong>Home leave</strong> <span class="wtrade">${esc(fmtDate(lv.from))} – ${esc(fmtDate(lv.to))}</span></span>`):`<select class="site${selVal?"":" none"}" id="site-${id}" data-w="${id}" aria-label="Site for ${esc(wl(w))}"${dis}>${siteOptions(selVal)}</select>`}<span id="runwrap-${id}">${runCell(w.id,d,dis)}</span></div></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="n-${id}" data-w="${id}" data-f="n" value="${r.n||""}" placeholder="0" aria-label="Normal hours"${hd}></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="o-${id}" data-w="${id}" data-f="o" value="${r.o||""}" placeholder="0" aria-label="Overtime hours"${hd}></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="h-${id}" data-w="${id}" data-f="h" value="${r.h||""}" placeholder="0" aria-label="Rest day or public holiday hours"${hd}></td>
@@ -1509,6 +1509,8 @@ document.addEventListener("click", e=>{
     const list=[...((S.workers[wid]||{}).homeLeave||[])]; if(list.some(p=>!(t2<p.from||f>p.to))){ toast("That overlaps home leave already recorded. Remove or change the other one first."); return; }
     list.push({from:f,to:t2}); list.sort((a,b)=>a.from<b.from?-1:1); S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true);
     PR.hlFrom=""; toast(`Home leave added: ${n} day${n>1?"s":""}, ${fmtDate(f)} to ${fmtDate(t2)} (unpaid).`); render(); return; }
+  if(b.dataset.hlcancel){ if(b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="Confirm cancel"; setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent="Cancel this leave"}},3000); return; }
+    const wid=b.dataset.hlcancel, list=((S.workers[wid]||{}).homeLeave||[]).filter(q=>q.from!==b.dataset.hlfrom); S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true); toast("Home leave cancelled."); render(); return; }
   if(b.dataset.hlrm!==undefined && b.dataset.hlw){ if(b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="Confirm remove"; setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent="Remove"}},3000); return; }
     const wid=b.dataset.hlw, list=[...((S.workers[wid]||{}).homeLeave||[])]; list.splice(+b.dataset.hlrm,1); S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true); toast("Home leave removed."); render(); return; }
   if(b.dataset.pick){ const pk=document.getElementById("pk-"+b.dataset.pick); if(pk){ try{ pk.showPicker(); }catch(_){ pk.focus(); pk.click(); } } return; }
@@ -1561,7 +1563,12 @@ document.addEventListener("change", e=>{
   if(t.id==="hlSite"){ S.hlSite=t.value; render(); return; }
   if(t.classList.contains("sel")){ t.checked?S.selected.add(t.dataset.w):S.selected.delete(t.dataset.w); render(); return; }
   if(t.id==="selAll"){ document.querySelectorAll("#view-roster tbody input.sel").forEach(i=>{t.checked?S.selected.add(i.dataset.w):S.selected.delete(i.dataset.w)}); render(); return; }
-  if(t.matches("select.site") && sid0(t)===HL){ PR.hlFrom=isoOf(S.monthKey,S.day); openProfile(t.dataset.w); setTimeout(()=>{ const el=document.getElementById("hl-days"); if(el){ el.scrollIntoView({block:"center"}); el.focus(); } hlPreview(); },50); return; }
+  if(t.matches("select.site") && sid0(t)===HL){ const wid=t.dataset.w, f=isoOf(S.monthKey,S.day);
+    if(!editable()){ PR.hlFrom=f; openProfile(wid); return; }
+    const list=[...((S.workers[wid]||{}).homeLeave||[])]; list.push({from:f,to:f}); list.sort((a,b)=>a.from<b.from?-1:1);
+    S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true);
+    toast(`Home leave starts ${fmtDate(f)}. Type the number of days.`); render();
+    const el=document.getElementById("hlr-"+wid); if(el){ el.focus(); el.select(); } return; }
   if(t.matches("select.site") && editable()){ const wid=t.dataset.w, sid=t.value, d=S.day, old=runInfo(wid,d);
     if(!sid) setDay(wid,d,null,true);
     else if(sid===OFF) setDay(wid,d,{s:OFF,n:0,o:0,h:0},true);
@@ -1574,6 +1581,11 @@ document.addEventListener("change", e=>{
     if(len<1) len=1; if(len>mx) len=mx; const got=setRun(wid,d,len);
     const ri=runInfo(wid,d); toast(`${S.workers[wid].name}: ${siteName(dayRec(wid,d).s)} for ${got} day${got>1?"s":""}, until ${shortDay(S.monthKey,ri.last)}.`);
     render(); return; }
+  if(t.dataset.hlr){ const wid=t.dataset.hlr, f=t.dataset.hlfrom, n=parseInt(t.value,10); const list=[...((S.workers[wid]||{}).homeLeave||[])]; const i=list.findIndex(q=>q.from===f); if(i<0) return;
+    if(!n||n<1){ toast("Enter at least 1 day."); render(); return; } const to=addDaysIso(f,n-1);
+    if(list.some((q,j)=>j!==i && !(to<q.from||f>q.to))){ toast("That would overlap another home leave."); render(); return; }
+    list[i]={from:f,to}; S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true);
+    toast(`Home leave: ${n} day${n>1?"s":""}, ${fmtDate(f)} to ${fmtDate(to)}. Back at work ${fmtDate(addDaysIso(to,1))}.`); render(); return; }
   if(t.dataset.hldays!==undefined && t.dataset.hlw){ const wid=t.dataset.hlw, i=+t.dataset.hldays, n=parseInt(t.value,10); const list=[...((S.workers[wid]||{}).homeLeave||[])]; const pr=list[i]; if(!pr) return;
     if(!n||n<1){ toast("Enter at least 1 day."); render(); return; } const to=addDaysIso(pr.from,n-1);
     if(list.some((q,j)=>j!==i && !(to<q.from||pr.from>q.to))){ toast("That would overlap another home leave."); render(); return; }
@@ -1617,7 +1629,7 @@ document.addEventListener("focusout", e=>{ const t=e.target; if(t.dataset&&(t.da
 document.addEventListener("keydown", e=>{ const t=e.target; if(e.key!=="Enter"||!t.dataset) return;
   if(t.dataset.date && t.id!=="hl-from"){ e.preventDefault(); t.blur(); return; }
   if(t.id==="hl-days"||t.id==="hl-from"){ e.preventDefault(); const bt=document.querySelector("[data-hladd]"); if(t.id==="hl-from"){ const d=$("#hl-days"); if(d) d.focus(); } else if(bt) bt.click(); return; }
-  if(t.dataset.hldays!==undefined){ e.preventDefault(); t.blur(); return; }
+  if(t.dataset.hldays!==undefined || t.dataset.hlr){ e.preventDefault(); t.blur(); return; }
   if(t.dataset.run){ e.preventDefault(); t.blur(); return; }
   if(!t.dataset.f) return; e.preventDefault();
   const col=[...document.querySelectorAll(`#view-roster input[data-f="${t.dataset.f}"]`)]; const i=col.indexOf(t); const nx=col[e.shiftKey?i-1:i+1]; if(nx){nx.focus();nx.select()} });
