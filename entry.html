@@ -15,7 +15,7 @@ window.SUPABASE_CONFIG = {
 window.APP_ROLE = "entry";  // data entry link: no pay, roster view-only
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<meta name="app-version" content="20261023031028">
+<meta name="app-version" content="20261023031732">
 <title>Hong Soon Seng Roster Entry</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23e0a100%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Arial%27 font-weight=%27700%27 font-size=%2716%27 text-anchor=%27middle%27 fill=%27%232a2000%27%3ESP%3C/text%3E%3C/svg%3E">
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -290,6 +290,9 @@ const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const TABS = ["roster","grid","payroll","sites","profiles","team","settings"];
 const OFF = "off";
 const HL = "hl";  // home leave (unpaid)
+const MC = "mc";  // medical leave (paid within MOM entitlement)
+const LT = {hl:{key:"homeLeave",label:"Home leave",short:"HL",now:"On home leave"}, mc:{key:"medicalLeave",label:"Medical leave",short:"MC",now:"On MC"}};
+const isLeave = s => s===HL || s===MC;
 const DUE_HOUR = 18;
 const COMPANY = "Hong Soon Seng Construction & Trading Pte Ltd";
 const DEFAULT_SETTINGS = {company:COMPANY, currency:"S$", ot15:1.5, ot20:2.0, otLimit:72, dayHours:8, workWeek:6, dayBasis:"fixed26", autoFill:true, skipSun:true, sample:false};
@@ -336,8 +339,8 @@ const workerList = () => allWorkers().filter(w=>w.active!==false);
 const wl = w => String((w&&w.name)||"") + (w&&w.empId ? " ("+w.empId+")" : "");
 const siteList = () => Object.entries(S.sites).map(([id,s])=>({id,...s})).sort(byOrder);
 const isSite = id => !!(id && id!==OFF && S.sites[id]);
-const siteName = id => id===HL ? "Home leave" : id===OFF ? "Off" : isSite(id) ? S.sites[id].name : "";
-const siteCode = id => { if(id===HL) return "HL"; if(id===OFF) return "OFF"; if(!isSite(id)) return "?"; const s=S.sites[id]; if(s.location) return String(s.location).slice(0,7);
+const siteName = id => id===HL ? "Home leave" : id===MC ? "Medical leave" : id===OFF ? "Off" : isSite(id) ? S.sites[id].name : "";
+const siteCode = id => { if(id===HL) return "HL"; if(id===MC) return "MC"; if(id===OFF) return "OFF"; if(!isSite(id)) return "?"; const s=S.sites[id]; if(s.location) return String(s.location).slice(0,7);
   return String(s.name).split(/\s+/).map(x=>x[0]).join("").slice(0,4).toUpperCase(); };
 function payRuleText(s){ const v=num(s.payValue); if(s.payMode==="fixed") return `${cur()} ${v.toFixed(2)}/hr flat`; if(s.payMode==="plus") return `base +${v.toFixed(2)}/hr`; return "worker's base rate"; }
 
@@ -351,11 +354,32 @@ function entry(wid){ return entryIn(S.month,wid); }
 const sid0 = el => el.value;
 const isoOf = (key,d) => key+"-"+String(d).padStart(2,"0");
 const isoToday = () => { const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; };
-function leaveOn(wid,iso){ return ((S.workers[wid]||{}).homeLeave||[]).find(p=>p.from<=iso && iso<=p.to) || null; }
-function recIn(md,wid,d,key){ key=key||(md&&md.month)||S.monthKey; if(leaveOn(wid,isoOf(key,d))) return {s:HL,n:0,o:0,h:0,set:true,leave:true}; const r=(entryIn(md,wid).days||{})[d]; return r ? {s:r.s||"", n:num(r.n), o:num(r.o), h:num(r.h), set:true} : {s:"",n:0,o:0,h:0,set:false}; }
+const leaveList = (wid,type) => ((S.workers[wid]||{})[LT[type].key]||[]);
+function leaveOn(wid,iso){ for(const type of ["hl","mc"]){ const p=leaveList(wid,type).find(q=>q.from<=iso && iso<=q.to); if(p) return {...p,type}; } return null; }
+function leaveOverlaps(wid,f,t,type,exceptFrom){ for(const ty of ["hl","mc"]) for(const q of leaveList(wid,ty)){ if(ty===type && q.from===exceptFrom) continue; if(!(t<q.from||f>q.to)) return LT[ty].label.toLowerCase(); } return ""; }
+function saveLeave(wid,type,list){ list=[...list].sort((a,b)=>a.from<b.from?-1:1); S.workers[wid]={...S.workers[wid],[LT[type].key]:list}; saveDoc("workers",wid,{[LT[type].key]:list},true); }
+/* MOM paid sick leave: 3 months' service -> 5 outpatient / 15 hospitalisation, 4 -> 8/30, 5 -> 11/45, 6+ -> 14/60 (hospitalisation includes outpatient) */
+const MC_ENT=[[6,14,60],[5,11,45],[4,8,30],[3,5,15]];
+function serviceMonths(w,iso){ if(!w.joined) return 99; const a=new Date(w.joined+"T00:00:00"), b=new Date(iso+"T00:00:00"); let m=(b.getFullYear()-a.getFullYear())*12+(b.getMonth()-a.getMonth()); if(b.getDate()<a.getDate()) m--; return m; }
+function mcEnt(months){ for(const [mm,o,h] of MC_ENT) if(months>=mm) return {out:o,hosp:h}; return {out:0,hosp:0}; }
+const _mcCache={};
+function mcYear(wid,year){ const w=S.workers[wid]||{}, list=leaveList(wid,"mc");
+  const ck=wid+"|"+year+"|"+JSON.stringify(list)+"|"+(w.joined||"")+"|"+S.settings.workWeek; if(_mcCache[ck]) return _mcCache[ck];
+  const map={}; let outUsed=0, hospUsed=0, total=0, unpaid=0; const y0=year+"-01-01", y1=year+"-12-31";
+  for(const p of [...list].sort((a,b)=>a.from<b.from?-1:1)){ if(p.to<y0||p.from>y1) continue;
+    for(let iso=p.from<y0?y0:p.from; iso<=(p.to>y1?y1:p.to); iso=addDaysIso(iso,1)){
+      const key=iso.slice(0,7), d=+iso.slice(8); if(!isWorkingDay(key,d)){ map[iso]="rest"; continue; }
+      const ent=mcEnt(serviceMonths(w,iso)); let paid=false;
+      if(p.hosp){ if(total<ent.hosp){ paid=true; total++; hospUsed++; } } else if(outUsed<ent.out && total<ent.hosp){ paid=true; outUsed++; total++; }
+      map[iso]=paid?"paid":"unpaid"; if(!paid) unpaid++; } }
+  const ent=mcEnt(serviceMonths(w, year+"-12-31"<isoToday()?year+"-12-31":isoToday()));
+  return (_mcCache[ck]={map,outUsed,hospUsed,total,unpaid,ent}); }
+const mcStatus = (wid,iso) => mcYear(wid,iso.slice(0,4)).map[iso]||"unpaid";
+const mcDayPay = wid => isMonthly(wid) ? 0 : baseRate(wid)*(num(S.settings.dayHours)||8);
+function recIn(md,wid,d,key){ key=key||(md&&md.month)||S.monthKey; const lv=leaveOn(wid,isoOf(key,d)); if(lv) return {s:lv.type,n:0,o:0,h:0,set:true,leave:lv}; const r=(entryIn(md,wid).days||{})[d]; return r ? {s:r.s||"", n:num(r.n), o:num(r.o), h:num(r.h), set:true} : {s:"",n:0,o:0,h:0,set:false}; }
 const dayRec = (wid,d) => recIn(S.month,wid,d);
 const dayHrs = r => r.n+r.o+r.h;
-const assigned = r => r.s===OFF || r.s===HL || isSite(r.s);
+const assigned = r => r.s===OFF || isLeave(r.s) || isSite(r.s);
 function baseRate(wid){ const fz=S.month&&S.month.frozen; if(locked()&&fz&&fz.w&&fz.w[wid]!==undefined) return num(fz.w[wid]); return num((S.workers[wid]||{}).rate); }
 function siteRule(sid){ const fz=S.month&&S.month.frozen; if(locked()&&fz&&fz.s&&fz.s[sid]) return fz.s[sid]; return S.sites[sid]||{}; }
 function customRate(wid,sid){ const fz=S.month&&S.month.frozen; const src = locked()&&fz&&fz.ws ? (fz.ws[wid]||{}) : ((S.workers[wid]||{}).siteRates||{});
@@ -372,9 +396,9 @@ function workingDaysIn(key){ let c=0; for(let d=1; d<=daysIn(key); d++) if(isWor
 const salaryDivisor = key => S.settings.dayBasis==="calendar" ? workingDaysIn(key) : 26;
 function salaryInfo(wid){ const key=S.monthKey, WD=workingDaysIn(key), div=salaryDivisor(key), sal=salaryOf(wid), daily=sal/div, t=new Date(), cur=keyOf(t);
   const lastPast = key<cur ? daysIn(key) : key===cur ? t.getDate()-1 : 0;
-  let missed=0, leave=0; for(let d=1; d<=daysIn(key); d++){ if(!isWorkingDay(key,d)) continue; const r=dayRec(wid,d);
-    if(r.s===HL){ missed++; leave++; continue; } if(d<=lastPast && r.n+r.o+r.h<=0) missed++; }
-  return {sal, WD, div, daily, missed, leave, worked:WD-missed, pay:Math.max(0,sal-missed*daily), hr:monthlyHr(wid), toDate:key===cur}; }
+  let missed=0, leave=0, mcUnpaid=0; for(let d=1; d<=daysIn(key); d++){ if(!isWorkingDay(key,d)) continue; const r=dayRec(wid,d);
+    if(r.s===HL){ missed++; leave++; continue; } if(r.s===MC){ if(mcStatus(wid,isoOf(key,d))!=="paid"){ missed++; mcUnpaid++; } continue; } if(d<=lastPast && r.n+r.o+r.h<=0) missed++; }
+  return {sal, WD, div, daily, missed, leave, mcUnpaid, worked:WD-missed, pay:Math.max(0,sal-missed*daily), hr:monthlyHr(wid), toDate:key===cur}; }
 function dayParts(wid,r,d){ const st=S.settings, key=S.monthKey;
   if(isMonthly(wid)){ const hr=monthlyHr(wid), work=isWorkingDay(key,d), any=(r.n+r.o+r.h)>0;
     const np = work && any ? salaryOf(wid)/salaryDivisor(key) : 0;
@@ -388,8 +412,8 @@ const rateLabel = w => w.payType==="monthly" ? `Salary ${fmt0(num(w.salary))}/mo
 function monthOf(wid){
   const st=S.settings, N=daysIn(S.monthKey);
   const mon=isMonthly(wid);
-  const m={monthly:mon, leaveDays:0, base:mon?salaryOf(wid):baseRate(wid), normal:0, ot15:0, ot20:0, days:0, noSiteDays:0, bySite:{}, adj:num(entry(wid).adj), normalPay:0, ot15Pay:0, ot20Pay:0};
-  for(let d=1; d<=N; d++){ const r=dayRec(wid,d); if(r.s===HL){ m.leaveDays++; continue; } const h=dayHrs(r); if(!h) continue;
+  const m={monthly:mon, leaveDays:0, mcDays:0, mcPaid:0, mcPay:0, base:mon?salaryOf(wid):baseRate(wid), normal:0, ot15:0, ot20:0, days:0, noSiteDays:0, bySite:{}, adj:num(entry(wid).adj), normalPay:0, ot15Pay:0, ot20Pay:0};
+  for(let d=1; d<=N; d++){ const r=dayRec(wid,d); if(r.s===HL){ m.leaveDays++; continue; } if(r.s===MC){ m.mcDays++; if(mcStatus(wid,isoOf(S.monthKey,d))==="paid"){ m.mcPaid++; const mp=mcDayPay(wid); m.mcPay+=mp; m.normalPay+=mp; } continue; } const h=dayHrs(r); if(!h) continue;
     m.days++; if(!isSite(r.s)) m.noSiteDays++;
     const p=dayParts(wid,r,d), rt=p.rt;
     m.normal+=r.n-p.rdExtra; m.ot15+=r.o; m.ot20+=r.h+p.rdExtra;
@@ -708,15 +732,23 @@ function render(){
 function captureFocus(){ const a=document.activeElement; if(!a||!a.id||a===document.body) return null; return {id:a.id,val:a.value,s:a.selectionStart,e:a.selectionEnd,typing:a.tagName==="INPUT"}; }
 function restoreFocus(f){ if(!f) return; const el=document.getElementById(f.id); if(!el) return; if(f.typing&&el.tagName==="INPUT"&&el.type!=="checkbox"&&!f.noKeep) el.value=f.val; el.focus({preventScroll:true}); try{ if(f.s!=null) el.setSelectionRange(f.s,f.e) }catch(e){} }
 function siteOptions(sel,opts){ opts=opts||{}; let h=`<option value=""${!sel?" selected":""}>${esc(opts.none||"— Choose site —")}</option>`;
-  if(opts.off!==false){ h+=`<option value="${OFF}"${sel===OFF?" selected":""}>Off / rest day</option>`; if(!opts.noLeave) h+=`<option value="${HL}">Home leave…</option>`; }
+  if(opts.off!==false){ h+=`<option value="${OFF}"${sel===OFF?" selected":""}>Off / rest day</option>`; if(!opts.noLeave) h+=`<option value="${HL}">Home leave…</option><option value="${MC}">Medical leave (MC)…</option>`; }
   for(const s of siteList()){ const done=s.status==="completed"; if(done && s.id!==sel) continue; h+=`<option value="${esc(s.id)}"${s.id===sel?" selected":""}>${esc(s.name)}${done?" (completed)":""}</option>`; } return h; }
 function emptySetup(){ return `<div class="panel"><div class="empty"><h3>No workers or sites yet</h3><p>Set up your crew and project sites to start the daily roster. You can rename everyone afterwards.</p>
   ${S.canWrite?'<button class="btn primary" id="quickSetup">Create 22 workers and 15 sites</button><button class="linkbtn" data-go="profiles">Or add workers one by one</button>':''}${S.mode==="local"?'<button class="linkbtn" data-go="settings">Restore from a backup file</button>':''}</div></div>`; }
 function siteFilterOptions(val){ return `<option value="all"${val==="all"?" selected":""}>All workers</option><option value="none"${val==="none"?" selected":""}>Not assigned yet</option><option value="${OFF}"${val===OFF?" selected":""}>Off</option>`+siteList().map(s=>`<option value="${esc(s.id)}"${val===s.id?" selected":""}>${esc(s.name)}</option>`).join(""); }
 
 /* ---------- daily roster ---------- */
+function rosterLeaveCell(w,lv,d){ const id=esc(w.id), L=LT[lv.type], n=Math.round((new Date(lv.to+"T00:00:00")-new Date(lv.from+"T00:00:00"))/864e5)+1;
+  const st = lv.type===MC ? mcStatus(w.id,isoOf(S.monthKey,d)) : "";
+  const tag = lv.type===MC ? (st==="paid"?' <span class="chip ok plain">paid</span>':st==="rest"?' <span class="wtrade">rest day</span>':' <span class="chip warn plain">unpaid</span>') : "";
+  if(!editable()) return `<span><strong>${L.label}</strong>${tag} <span class="wtrade">${esc(fmtDate(lv.from))} – ${esc(fmtDate(lv.to))}</span></span>`;
+  return `<span><strong>${L.label}</strong>${tag}</span><span class="run">from ${esc(fmtDate(lv.from))} for <input type="number" min="1" max="730" step="1" id="lvr-${id}" data-lvr="${id}" data-lt="${lv.type}" data-lvfrom="${esc(lv.from)}" value="${n}" aria-label="Number of days of ${L.label.toLowerCase()}"> days · back ${esc(fmtDate(addDaysIso(lv.to,1)))}</span>
+    ${lv.type===MC?`<label class="run"><input type="checkbox" data-lvhospr="${id}" data-lvfrom="${esc(lv.from)}"${lv.hosp?" checked":""}> Hospitalisation</label>`:""}
+    <button class="linkbtn del" data-lvcancel="${id}" data-lt="${lv.type}" data-lvfrom="${esc(lv.from)}" style="justify-self:start">Cancel this leave</button>`; }
 function statusChip(r){ const h=dayHrs(r);
   if(r.s===HL) return `<span class="chip info">Home leave</span>`;
+  if(r.s===MC) return `<span class="chip info">Medical leave</span>`;
   if(r.s===OFF) return `<span class="wtrade">Off</span>`;
   if(h>0&&!isSite(r.s)) return `<span class="chip warn">No site</span>`;
   if(isSite(r.s)&&!h) return `<span class="chip info">No hours</span>`;
@@ -733,9 +765,9 @@ function renderRoster(){
   let strip="";
   for(let i=1;i<=N;i++){ const cnt=ws.filter(w=>assigned(dayRec(w.id,i))).length; const wd=wdOf(S.monthKey,i);
     strip+=`<button class="day${wd===0?" sun":""}${cnt?" has":""}${i===td?" today":""}" id="day-${i}" data-day="${i}" aria-pressed="${i===d}" aria-label="${esc(dayLabel(S.monthKey,i))}, ${cnt} of ${ws.length} assigned"><span class="dw">${WD[wd].slice(0,2)}</span><span class="dn">${i}</span><span class="dc">${cnt?cnt+"/"+ws.length:"·"}</span></button>`; }
-  const dep={}; let onDuty=0, cost=0, offSite=0, off=0, unas=0;
+  const dep={}; let onDuty=0, cost=0, offSite=0, off=0, unas=0, hlN=0, mcN=0;
   for(const w of ws){ const r=dayRec(w.id,d); const h=dayHrs(r);
-    if(r.s===OFF) off++; else if(!assigned(r)) unas++;
+    if(r.s===OFF) off++; else if(r.s===HL) hlN++; else if(r.s===MC) mcN++; else if(!assigned(r)) unas++;
     if(h>0){ onDuty++; cost+=dayPay(w.id,r); if(isSite(r.s)) dep[r.s]=(dep[r.s]||0)+1; else offSite++; } else if(isSite(r.s)) dep[r.s]=(dep[r.s]||0)+1; }
   const depChips = siteList().filter(s=>dep[s.id]).map(s=>`<span class="chip plain" title="${esc(s.name)}">${esc(s.name)} <b>${dep[s.id]}</b></span>`).join("") + (offSite?`<span class="chip warn">Hours with no site <b>${offSite}</b></span>`:"");
   const q=S.search.trim().toLowerCase();
@@ -748,11 +780,11 @@ function renderRoster(){
     ft.n+=r.n; ft.o+=r.o; ft.h+=r.h; ft.pay+=pay;
     const id=esc(w.id), selVal = r.s===OFF?OFF : isSite(r.s)?r.s:"";
     const mw=isMonthly(w.id), rt = mw ? monthlyHr(w.id) : isSite(r.s) ? rateFor(w.id,r.s) : baseRate(w.id);
-    const hd = (r.s===OFF||r.s===HL)?" disabled":dis; const lv = r.s===HL ? leaveOn(w.id,isoOf(S.monthKey,d)) : null;
+    const hd = (r.s===OFF||isLeave(r.s))?" disabled":dis; const lv = isLeave(r.s) ? r.leave : null;
     body+=`<tr>
       <td><input type="checkbox" class="sel" id="sel-${id}" data-w="${id}" aria-label="Select ${esc(wl(w))}"${S.selected.has(w.id)?" checked":""}${dis}></td>
       <td><button class="linkname" data-profile="${id}">${esc(wl(w))}</button><span class="wtrade pay">${esc(rateLabel(w))}</span></td>
-      <td><div class="sitecell">${lv?(editable()?`<strong>Home leave</strong><span class="run">from ${esc(fmtDate(lv.from))} for <input type="number" min="1" max="730" step="1" id="hlr-${id}" data-hlr="${id}" data-hlfrom="${esc(lv.from)}" value="${Math.round((new Date(lv.to+"T00:00:00")-new Date(lv.from+"T00:00:00"))/864e5)+1}" aria-label="Number of days of home leave"> days · back ${esc(fmtDate(addDaysIso(lv.to,1)))}</span><button class="linkbtn del" data-hlcancel="${id}" data-hlfrom="${esc(lv.from)}" style="justify-self:start">Cancel this leave</button>`:`<span><strong>Home leave</strong> <span class="wtrade">${esc(fmtDate(lv.from))} – ${esc(fmtDate(lv.to))}</span></span>`):`<select class="site${selVal?"":" none"}" id="site-${id}" data-w="${id}" aria-label="Site for ${esc(wl(w))}"${dis}>${siteOptions(selVal)}</select>`}<span id="runwrap-${id}">${runCell(w.id,d,dis)}</span></div></td>
+      <td><div class="sitecell">${lv?rosterLeaveCell(w,lv,d):`<select class="site${selVal?"":" none"}" id="site-${id}" data-w="${id}" aria-label="Site for ${esc(wl(w))}"${dis}>${siteOptions(selVal)}</select>`}<span id="runwrap-${id}">${runCell(w.id,d,dis)}</span></div></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="n-${id}" data-w="${id}" data-f="n" value="${r.n||""}" placeholder="0" aria-label="Normal hours"${hd}></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="o-${id}" data-w="${id}" data-f="o" value="${r.o||""}" placeholder="0" aria-label="Overtime hours"${hd}></td>
       <td class="num"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" id="h-${id}" data-w="${id}" data-f="h" value="${r.h||""}" placeholder="0" aria-label="Rest day or public holiday hours"${hd}></td>
@@ -768,7 +800,10 @@ function renderRoster(){
       <span class="quick" style="margin-left:auto"><button class="btn" id="goToday">Today</button><button class="btn" id="goTomorrow">Tomorrow</button></span></div>
     <div class="kpis" style="margin:12px 14px 0;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
       <div class="kpi lead"><span class="k">Assigned</span><span class="v" id="d-asg">${ws.length-unas}<small> / ${ws.length}</small></span><span class="s">${unas?`<span class="chip warn">${unas} still to assign</span>`:"Everyone has a site or is off"}</span></div>
-      <div class="kpi"><span class="k">On site</span><span class="v">${ws.length-unas-off}</span><span class="s">${off} off</span></div>
+      <div class="kpi"><span class="k">On site</span><span class="v">${ws.length-unas-off-hlN-mcN}</span><span class="s">working today</span></div>
+      <div class="kpi"><span class="k">Off</span><span class="v">${off}</span><span class="s">rest day</span></div>
+      <div class="kpi"><span class="k">Home leave</span><span class="v">${hlN}</span><span class="s">unpaid</span></div>
+      <div class="kpi"><span class="k">Medical leave</span><span class="v">${mcN}</span><span class="s">on MC</span></div>
       <div class="kpi"><span class="k">Sites active</span><span class="v">${Object.keys(dep).length}<small> / ${siteList().filter(x=>x.status!=="completed").length}</small></span></div>
       <div class="kpi pay"><span class="k">Day labour cost</span><span class="v" id="d-cost">${fmt0(cost)}</span><span class="s">at each site's pay rate</span></div>
     </div>
@@ -816,7 +851,7 @@ function renderGrid(){
     for(let d=1;d<=N;d++){ const r=dayRec(w.id,d), h=dayHrs(r);
       if(h>0){days++;tot+=h;perDay[d]++}
       if(!assigned(r) && !h){ row+=`<td><button class="cell${hl?" dim":""}" data-jump="${d}" aria-label="${esc(wl(w))}, ${d}: not assigned">·</button></td>`; continue; }
-      if(r.s===HL){ row+=`<td><button class="cell${hl?" dim":""}" data-jump="${d}" aria-label="${esc(wl(w))}, ${d}: home leave" style="color:var(--info);font-weight:600">HL</button></td>`; continue; }
+      if(isLeave(r.s)){ row+=`<td><button class="cell${hl?" dim":""}" data-jump="${d}" aria-label="${esc(wl(w))}, ${d}: ${LT[r.s].label.toLowerCase()}" style="color:var(--info);font-weight:600">${LT[r.s].short}</button></td>`; continue; }
       if(r.s===OFF){ row+=`<td><button class="cell${hl?" dim":""}" data-jump="${d}" aria-label="${esc(wl(w))}, ${d}: off" style="color:var(--muted)">off</button></td>`; continue; }
       const cls = h>0&&!isSite(r.s)?"noset": r.h>0?"ph":"on";
       const dim = hl && r.s!==hl ? " dim" : hl && r.s===hl ? " hl":"";
@@ -901,7 +936,7 @@ function renderPayrollMonth(){
   let body="", ft={d:0,n:0,o:0,h:0,gross:0,adj:0,net:0};
   for(const w of rows){ const m=monthOf(w.id); const id=esc(w.id);
     ft.d+=m.days; ft.n+=m.normal; ft.o+=m.ot15; ft.h+=m.ot20; ft.gross+=m.gross; ft.adj+=m.adj; ft.net+=m.net;
-    const status = m.noSiteDays?`<span class="chip warn" title="Days with hours but no site">${m.noSiteDays} day${m.noSiteDays>1?"s":""} no site</span>`: m.otHrs>lim?`<span class="chip warn" title="Over the ${lim}-hour monthly overtime limit">OT ${hrs(m.otHrs)}h</span>`: m.leaveDays?`<span class="chip info">Home leave ${m.leaveDays}d</span>`: m.totalHrs===0?`<span class="chip info">No hours</span>`:`<span class="chip ok">OK</span>`;
+    const status = m.noSiteDays?`<span class="chip warn" title="Days with hours but no site">${m.noSiteDays} day${m.noSiteDays>1?"s":""} no site</span>`: m.otHrs>lim?`<span class="chip warn" title="Over the ${lim}-hour monthly overtime limit">OT ${hrs(m.otHrs)}h</span>`: m.leaveDays?`<span class="chip info">Home leave ${m.leaveDays}d</span>`: m.mcDays?`<span class="chip info">MC ${m.mcDays}d</span>`: m.totalHrs===0?`<span class="chip info">No hours</span>`:`<span class="chip ok">OK</span>`;
     body+=`<tr><td><button class="linkname" data-profile="${id}">${esc(wl(w))}</button></td>
       <td class="num mono">${m.days}</td><td class="num mono">${m.siteCount}</td><td class="num mono">${m.monthly?fmt0(m.base)+"/mo":m.base.toFixed(2)+"/hr"}</td>
       <td class="num mono">${hrs(m.normal)}</td><td class="num mono">${hrs(m.ot15)}</td><td class="num mono">${hrs(m.ot20)}</td>
@@ -1048,7 +1083,11 @@ function exCompute(months){
   for(const [key,data] of Object.entries(months)){ if(!data) continue; T.months++;
     withMonth(key,data,()=>{ const N=daysIn(key);
       for(const w of workers){ const e=entry(w.id); let any=false, sumNp=0;
-        for(let d=1; d<=N; d++){ const r=dayRec(w.id,d), h=dayHrs(r); if(!h) continue;
+        for(let d=1; d<=N; d++){ const r=dayRec(w.id,d), h=dayHrs(r);
+          if(r.s===MC && site==="all" && !isMonthly(w.id) && mcStatus(w.id,isoOf(key,d))==="paid"){ const pay=mcDayPay(w.id); if(pay>0){
+            const a=W[w.id]||(W[w.id]={w,days:0,n:0,o:0,h:0,normalPay:0,otPay:0,gross:0,adj:0,sites:new Set()}); a.normalPay+=pay; a.gross+=pay; T.gross+=pay;
+            rows.push({date:isoOf(key,d), day:WD[wdOf(key,d)], worker:w.name, empId:w.empId||"", site:"Medical leave (paid)", rate:baseRate(w.id), n:0, o:0, h:0, pay}); } }
+          if(!h) continue;
           const sid=isSite(r.s)?r.s:"";
           if(site!=="all" && sid!==site) continue;
           const pp=dayParts(w.id,r,d), rt=pp.rt, np=pp.np, op=pp.op, pay=np+op; any=true; sumNp+=np;
@@ -1303,21 +1342,28 @@ async function readImportFile(file){
 
 const addDaysIso = (iso,n) => { const d=new Date(iso+"T00:00:00"); d.setDate(d.getDate()+n); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
 const dowShort = iso => WD[new Date(iso+"T00:00:00").getDay()];
-function hlPreview(){ const out=$("#hl-until"); if(!out) return; const f=dmyToIso(($("#hl-from")||{}).value), n=parseInt(($("#hl-days")||{}).value,10);
+function lvPreview(type){ const out=$("#"+type+"-until"); if(!out) return; const f=dmyToIso(($("#"+type+"-from")||{}).value), n=parseInt(($("#"+type+"-days")||{}).value,10);
   if(!f||!n||n<1){ out.textContent=""; return; } const last=addDaysIso(f,n-1), back=addDaysIso(f,n);
-  out.textContent=`Last day of leave ${dowShort(last)} ${fmtDate(last)} · back at work ${dowShort(back)} ${fmtDate(back)}`; }
-function leavePanel(w,dis){
-  const id=esc(w.id), today=isoToday(), list=(w.homeLeave||[]);
+  out.textContent=`Last day ${dowShort(last)} ${fmtDate(last)} · back at work ${dowShort(back)} ${fmtDate(back)}`; }
+function leavePanel(w,dis,type){
+  const L=LT[type], id=esc(w.id), today=isoToday(), list=leaveList(w.id,type);
   const days=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/864e5)+1;
-  const rows=list.map((p,i)=>{ const st=p.to<today?'<span class="wtrade">Past</span>':p.from>today?'<span class="chip draft plain">Upcoming</span>':'<span class="chip info">On leave now</span>';
-    return `<tr><td class="mono">${esc(isoToDmy(p.from))}</td><td class="mono">${esc(isoToDmy(p.to))}</td><td class="num">${dis?`<span class="mono">${days(p.from,p.to)}</span>`:`<input type="number" min="1" max="730" step="1" style="width:76px" id="hld-${i}" data-hldays="${i}" data-hlw="${id}" value="${days(p.from,p.to)}" aria-label="Number of days">`}</td><td>${st}</td><td>${dis?"":`<button class="linkbtn del" data-hlrm="${i}" data-hlw="${id}">Remove</button>`}</td></tr>`; }).join("");
-  return `<div class="panel"><div class="panel-head"><h2>Home leave</h2><p>Unpaid. Enter the first day and how many days. Every day counts, Sundays included. Change the days below to extend or shorten a leave.</p></div>
-    ${list.length?`<div class="scroll"><table><thead><tr><th>From</th><th>To</th><th class="num">Days</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="wtrade" style="padding:12px 14px 0;margin:0">No home leave recorded.</p>'}
+  let summary="";
+  if(type===MC){ const yr=today.slice(0,4), y=mcYear(w.id,yr), mo=serviceMonths(w,today);
+    summary = `<div class="quick" style="padding:10px 14px 0">${mo<3?`<span class="chip warn">Under 3 months' service: MC is unpaid</span>`:`<span class="chip ok plain">${yr}: ${y.outUsed} of ${y.ent.out} paid MC days used</span><span class="chip plain" style="background:var(--sunk)">Hospitalisation ${y.total} of ${y.ent.hosp} days</span>`}${y.unpaid?`<span class="chip warn">${y.unpaid} unpaid MC day${y.unpaid>1?"s":""}</span>`:""}${!w.joined?`<span class="wtrade">Add the date joined to check eligibility (assumed 6+ months).</span>`:""}</div>`; }
+  const rows=list.map((p,i)=>{ const st=p.to<today?'<span class="wtrade">Past</span>':p.from>today?'<span class="chip draft plain">Upcoming</span>':`<span class="chip info">${L.now}</span>`;
+    let paid=""; if(type===MC){ let pd=0,un=0; for(let iso=p.from; iso<=p.to; iso=addDaysIso(iso,1)){ const x=mcStatus(w.id,iso); if(x==="paid") pd++; else if(x==="unpaid") un++; } paid=`<td class="mono">${pd} paid${un?` · <span style="color:var(--warn)">${un} unpaid</span>`:""}</td><td>${dis?(p.hosp?"Yes":"—"):`<input type="checkbox" data-lvhosp="${i}" data-lvw="${id}"${p.hosp?" checked":""} aria-label="Hospitalisation">`}</td>`; }
+    return `<tr><td class="mono">${esc(isoToDmy(p.from))}</td><td class="mono">${esc(isoToDmy(p.to))}</td><td class="num">${dis?`<span class="mono">${days(p.from,p.to)}</span>`:`<input type="number" min="1" max="730" step="1" style="width:76px" id="${type}d-${i}" data-lvdays="${i}" data-lvw="${id}" data-lt="${type}" value="${days(p.from,p.to)}" aria-label="Number of days">`}</td>${paid}<td>${st}</td><td>${dis?"":`<button class="linkbtn del" data-lvrm="${i}" data-lvw="${id}" data-lt="${type}">Remove</button>`}</td></tr>`; }).join("");
+  const desc = type===MC ? "Paid under the Employment Act after 3 months' service, up to the yearly limit (14 days MC, 60 days including hospitalisation, less in the first 6 months). Days beyond the limit are unpaid. Hourly workers are paid base rate × normal hours per day; monthly salary isn't deducted." : "Unpaid. Enter the first day and how many days. Every day counts, Sundays included.";
+  const pre = PR.lvFrom && PR.lvFrom.type===type ? PR.lvFrom.from : "";
+  return `<div class="panel"><div class="panel-head"><h2>${L.label}</h2><p>${desc}</p></div>${summary}
+    ${list.length?`<div class="scroll"><table><thead><tr><th>From</th><th>To</th><th class="num">Days</th>${type===MC?"<th>Pay</th><th>Hospitalisation</th>":""}<th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:`<p class="wtrade" style="padding:12px 14px 0;margin:0">No ${L.label.toLowerCase()} recorded.</p>`}
     ${dis?"":`<div class="settings" style="max-width:none;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));align-items:end">
-      <label for="hl-from">Leave from<input type="text" inputmode="numeric" id="hl-from" data-date="hlFrom" placeholder="DD/MM/YYYY" maxlength="10" value="${esc(isoToDmy(PR.hlFrom||""))}"></label>
-      <label for="hl-days">Number of days<input type="number" min="1" max="730" step="1" inputmode="numeric" id="hl-days" placeholder="e.g. 30"></label>
-      <span class="hint" id="hl-until" style="align-self:center"></span>
-      <button class="btn primary" data-hladd="${id}">Add home leave</button></div>`}</div>`;
+      <label for="${type}-from">${type===MC?"MC from":"Leave from"}<input type="text" inputmode="numeric" id="${type}-from" data-date="${type}From" placeholder="DD/MM/YYYY" maxlength="10" value="${esc(isoToDmy(pre))}"></label>
+      <label for="${type}-days">Number of days<input type="number" min="1" max="730" step="1" inputmode="numeric" id="${type}-days" placeholder="${type===MC?"e.g. 2":"e.g. 30"}"></label>
+      ${type===MC?`<label class="check" for="mc-hosp" style="align-self:center"><input type="checkbox" id="mc-hosp"> <span>Hospitalisation</span></label>`:""}
+      <span class="hint" id="${type}-until" style="align-self:center"></span>
+      <button class="btn primary" data-lvadd="${id}" data-lt="${type}">Add ${L.label.toLowerCase()}</button></div>`}</div>`;
 }
 function renderProfiles(){
   const v=$("#view-profiles"); const ws=allWorkers();
@@ -1326,16 +1372,16 @@ function renderProfiles(){
   const w={id:PR.wid,...S.workers[PR.wid]}; const ed=S.canWrite, dis=ed?"":" disabled"; const id=esc(w.id);
   const q=PR.q.trim().toLowerCase();
   const list=ws.filter(x=>!q||String(x.name).toLowerCase().includes(q)||String(x.empId||"").toLowerCase().includes(q)).map(x=>{ const ps=permitState(x);
-    return `<button class="plist${x.id===w.id?" on":""}" data-profile="${esc(x.id)}" aria-current="${x.id===w.id}"><span class="wname">${esc(wl(x))}</span><span class="wtrade"><span class="pay">${esc(rateLabel(x))}</span>${x.active===false?" · inactive":""}${leaveOn(x.id,isoToday())?" · on home leave":""}</span>${ps&&ps.cls==="warn"?`<span class="chip warn">${esc(ps.txt)}</span>`:""}</button>`; }).join("");
+    return `<button class="plist${x.id===w.id?" on":""}" data-profile="${esc(x.id)}" aria-current="${x.id===w.id}"><span class="wname">${esc(wl(x))}</span><span class="wtrade"><span class="pay">${esc(rateLabel(x))}</span>${x.active===false?" · inactive":""}${(()=>{ const lv=leaveOn(x.id,isoToday()); return lv?" · "+LT[lv.type].now.toLowerCase():""; })()}</span>${ps&&ps.cls==="warn"?`<span class="chip warn">${esc(ps.txt)}</span>`:""}</button>`; }).join("");
   const expiring=ws.filter(x=>{const p=permitState(x); return p&&p.cls==="warn"&&x.active!==false}).length;
   // this month
   const m=monthOf(w.id), N=daysIn(S.monthKey), td=todayIn(S.monthKey);
   const first=wdOf(S.monthKey,1); let cal=WD.map(d=>`<span class="cal-h">${d.slice(0,2)}</span>`).join("");
   for(let i=0;i<first;i++) cal+=`<span></span>`;
   for(let d=1; d<=N; d++){ const r=dayRec(w.id,d), h=dayHrs(r);
-    const cls = r.s===HL?"off": r.s===OFF?"off": h>0&&!isSite(r.s)?"noset": isSite(r.s)? (r.h>0?"ph":"on") : "";
-    const tip = `${dayLabel(S.monthKey,d)} · ${r.s===HL?"Home leave":r.s===OFF?"Off":isSite(r.s)?siteName(r.s):"Not assigned"}${h?` · ${hrs(h)} h · ${fmt(dayPay(w.id,r,d))}`:""}`;
-    cal+=`<button class="cal-d ${cls}${d===td?" today":""}" data-jump="${d}" title="${esc(tip)}" aria-label="${esc(tip)}"><span class="cn">${d}</span><span class="cs">${r.s===HL?"HL":r.s===OFF?"off":isSite(r.s)?esc(siteCode(r.s)):""}</span></button>`; }
+    const cls = isLeave(r.s)?"off": r.s===OFF?"off": h>0&&!isSite(r.s)?"noset": isSite(r.s)? (r.h>0?"ph":"on") : "";
+    const tip = `${dayLabel(S.monthKey,d)} · ${isLeave(r.s)?LT[r.s].label:r.s===OFF?"Off":isSite(r.s)?siteName(r.s):"Not assigned"}${h?` · ${hrs(h)} h · ${fmt(dayPay(w.id,r,d))}`:""}`;
+    cal+=`<button class="cal-d ${cls}${d===td?" today":""}" data-jump="${d}" title="${esc(tip)}" aria-label="${esc(tip)}"><span class="cn">${d}</span><span class="cs">${isLeave(r.s)?LT[r.s].short:r.s===OFF?"off":isSite(r.s)?esc(siteCode(r.s)):""}</span></button>`; }
   const bySite=Object.entries(m.bySite).sort((a,b)=>b[1].pay-a[1].pay).map(([sid,b])=>`<tr><td>${esc(sid?siteName(sid):"No site")}</td><td class="num mono">${b.days}</td><td class="num mono">${hrs(b.n+b.o+b.h)}</td><td class="num mono">${b.rate.toFixed(2)}</td><td class="num net">${fmt(b.pay)}</td></tr>`).join("");
   // rates per site
   const sr=w.siteRates||{};
@@ -1362,7 +1408,7 @@ function renderProfiles(){
       <div class="panel"><div class="phead">
         <div class="avatar" aria-hidden="true">${esc(String(w.name||"?").split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase())}</div>
         <div style="min-width:0;flex:1"><h2 style="font-size:28px">${esc(wl(w))}</h2><div class="wtrade pay" style="font-size:14px">${w.payType==="monthly"?"Monthly salary "+fmt(num(w.salary)):"Base rate "+fmt(num(w.rate))+"/hr"}</div>
-          <div class="quick" style="margin-top:8px">${w.active===false?'<span class="chip info">Inactive</span>':'<span class="chip ok">Active</span>'}${(()=>{ const lv=leaveOn(w.id,isoToday()); return lv?`<span class="chip info">On home leave until ${esc(fmtDate(lv.to))}</span>`:''; })()}${ps?`<span class="chip ${ps.cls}">${esc(ps.txt)}${w.permitExpiry?" · "+esc(fmtDate(w.permitExpiry)):""}</span>`:""}${w.joined?`<span class="chip plain" style="background:var(--sunk)">Joined ${esc(fmtDate(w.joined))}</span>`:""}</div></div>
+          <div class="quick" style="margin-top:8px">${w.active===false?'<span class="chip info">Inactive</span>':'<span class="chip ok">Active</span>'}${(()=>{ const lv=leaveOn(w.id,isoToday()); return lv?`<span class="chip info">${LT[lv.type].now} until ${esc(fmtDate(lv.to))}</span>`:''; })()}${ps?`<span class="chip ${ps.cls}">${esc(ps.txt)}${w.permitExpiry?" · "+esc(fmtDate(w.permitExpiry)):""}</span>`:""}${w.joined?`<span class="chip plain" style="background:var(--sunk)">Joined ${esc(fmtDate(w.joined))}</span>`:""}</div></div>
         <div class="quick"><button class="btn primary pay" data-slip="${id}">${esc(mon3(S.monthKey))} payslip</button>${ed&&!IS_ENTRY?`<button class="btn del" data-delw="${id}">Remove worker</button>`:""}</div></div></div>
 
         <div class="panel"><div class="panel-head"><h2>Details</h2><p>Changes save as you leave each field.</p></div>
@@ -1395,7 +1441,8 @@ function renderProfiles(){
         <div class="panel pay"><div class="panel-head"><h2>Earnings ${ym(S.monthKey)[0]}</h2><p>Gross pay per month.</p></div>${ytd}</div>
       </div>
 
-        ${leavePanel(w,S.canWrite?"":" disabled")}
+        ${leavePanel(w,S.canWrite?"":" disabled","mc")}
+        ${leavePanel(w,S.canWrite?"":" disabled","hl")}
         <div class="panel pay"><div class="panel-head"><h2>Pay rate at each site</h2><p>Enter a rate to give ${esc(wl(w))} their own pay at that site. Leave empty for the default.</p></div>
           <div class="rates">${rates}</div></div>
     </div></div>`;
@@ -1415,6 +1462,7 @@ function openSlip(wid){
       ${m.monthly?`<tr><td>Monthly salary${m.salary.missed?` (less ${m.salary.missed} day${m.salary.missed>1?"s":""} not worked × ${fmt(m.salary.daily)})`:""}</td><td class="num mono">${fmt(m.salary.sal)}</td><td class="num mono">${fmt(m.normalPay)}</td></tr>`:`<tr><td>Normal hours</td><td class="num mono">${hrs(m.normal)} h</td><td class="num mono">${fmt(m.normalPay)}</td></tr>`}
       <tr><td>Overtime ${st.ot15}×</td><td class="num mono">${hrs(m.ot15)} h</td><td class="num mono">${fmt(m.ot15Pay)}</td></tr>
       <tr><td>Rest day / PH ${st.ot20}×</td><td class="num mono">${hrs(m.ot20)} h</td><td class="num mono">${fmt(m.ot20Pay)}</td></tr>
+      ${m.mcDays?`<tr><td>Medical leave</td><td class="num mono">${m.mcPaid} paid${m.mcDays-m.mcPaid?` · ${m.mcDays-m.mcPaid} unpaid/rest`:""}</td><td class="num mono">${m.monthly?"in salary":fmt(m.mcPay)}</td></tr>`:""}
       ${m.leaveDays?`<tr><td colspan="2">Home leave (unpaid)</td><td class="num mono">${m.leaveDays} day${m.leaveDays>1?"s":""}</td></tr>`:""}
       <tr><td colspan="2">Gross pay</td><td class="num mono">${fmt(m.gross)}</td></tr>
       <tr><td colspan="2">Adjustments</td><td class="num mono">${fmt(m.adj)}</td></tr>
@@ -1504,16 +1552,15 @@ document.addEventListener("click", e=>{
     toast(done?`${siteName(id)} reopened. It's back in the roster.`:`${siteName(id)} marked completed. It no longer appears when assigning sites; its history stays in payroll and reports.`); render(); return; }
   if(b.id==="impCancel"){ IMP.rows=null; const d=$("#impDlg"); d.close?d.close():d.removeAttribute("open"); return; }
   if(b.id==="impGo"){ b.disabled=true; b.textContent="Importing…"; runImport(); return; }
-  if(b.dataset.hladd){ const wid=b.dataset.hladd, f=dmyToIso($("#hl-from").value), n=parseInt($("#hl-days").value,10);
-    if(!f){ toast("Type the first day of leave as DD/MM/YYYY."); return; } if(!n||n<1){ toast("Enter the number of days of leave."); return; }
-    const t2=addDaysIso(f,n-1);
-    const list=[...((S.workers[wid]||{}).homeLeave||[])]; if(list.some(p=>!(t2<p.from||f>p.to))){ toast("That overlaps home leave already recorded. Remove or change the other one first."); return; }
-    list.push({from:f,to:t2}); list.sort((a,b)=>a.from<b.from?-1:1); S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true);
-    PR.hlFrom=""; toast(`Home leave added: ${n} day${n>1?"s":""}, ${fmtDate(f)} to ${fmtDate(t2)} (unpaid).`); render(); return; }
-  if(b.dataset.hlcancel){ if(b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="Confirm cancel"; setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent="Cancel this leave"}},3000); return; }
-    const wid=b.dataset.hlcancel, list=((S.workers[wid]||{}).homeLeave||[]).filter(q=>q.from!==b.dataset.hlfrom); S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true); toast("Home leave cancelled."); render(); return; }
-  if(b.dataset.hlrm!==undefined && b.dataset.hlw){ if(b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="Confirm remove"; setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent="Remove"}},3000); return; }
-    const wid=b.dataset.hlw, list=[...((S.workers[wid]||{}).homeLeave||[])]; list.splice(+b.dataset.hlrm,1); S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true); toast("Home leave removed."); render(); return; }
+  if(b.dataset.lvadd){ const wid=b.dataset.lvadd, type=b.dataset.lt, L=LT[type], f=dmyToIso($("#"+type+"-from").value), n=parseInt($("#"+type+"-days").value,10);
+    if(!f){ toast("Type the first day as DD/MM/YYYY."); return; } if(!n||n<1){ toast("Enter the number of days."); return; }
+    const t2=addDaysIso(f,n-1), ov=leaveOverlaps(wid,f,t2,type,null); if(ov){ toast(`That overlaps ${ov} already recorded. Change or remove it first.`); return; }
+    const rec={from:f,to:t2}; if(type===MC && $("#mc-hosp") && $("#mc-hosp").checked) rec.hosp=true;
+    saveLeave(wid,type,[...leaveList(wid,type),rec]); PR.lvFrom=null; toast(`${L.label} added: ${n} day${n>1?"s":""}, ${fmtDate(f)} to ${fmtDate(t2)}.`); render(); return; }
+  if(b.dataset.lvcancel){ if(b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="Confirm cancel"; setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent="Cancel this leave"}},3000); return; }
+    const wid=b.dataset.lvcancel, type=b.dataset.lt; saveLeave(wid,type,leaveList(wid,type).filter(q=>q.from!==b.dataset.lvfrom)); toast(`${LT[type].label} cancelled.`); render(); return; }
+  if(b.dataset.lvrm!==undefined && b.dataset.lvw){ if(b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="Confirm remove"; setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent="Remove"}},3000); return; }
+    const wid=b.dataset.lvw, type=b.dataset.lt, list=[...leaveList(wid,type)]; list.splice(+b.dataset.lvrm,1); saveLeave(wid,type,list); toast(`${LT[type].label} removed.`); render(); return; }
   if(b.dataset.pick){ const pk=document.getElementById("pk-"+b.dataset.pick); if(pk){ try{ pk.showPicker(); }catch(_){ pk.focus(); pk.click(); } } return; }
   if(b.dataset.profile){ openProfile(b.dataset.profile); return; }
   if(b.id==="addWP"){ const id=nextId("w",S.workers); S.workers[id]={name:"New worker",trade:"",rate:0,siteId:"",active:true,order:nextOrder(S.workers)}; saveDoc("workers",id,S.workers[id],false); openProfile(id); const el=document.getElementById("pf-name"); if(el){el.focus();el.select()} return; }
@@ -1529,7 +1576,7 @@ document.addEventListener("click", e=>{
   const d=S.day, ws=workerList();
   if(b.id==="copyPrev"){ if(d<2) return; const p={entries:{}}; let c=0;
     for(const w of ws){ if(assigned(dayRec(w.id,d))) continue; const r=dayRec(w.id,d-1); if(!assigned(r)) continue;
-      if(r.s===HL) continue;
+      if(isLeave(r.s)) continue;
       let rec = r.s===OFF ? {s:OFF,n:0,o:0,h:0} : recFor(w.id,d,r.s);
       p.entries[w.id]={days:{[d]:rec}}; c++; }
     if(!c){ toast(`Nothing to copy. Everyone is already assigned or nobody was rostered on ${d-1} ${mon3(S.monthKey)}.`); return; }
@@ -1564,12 +1611,11 @@ document.addEventListener("change", e=>{
   if(t.id==="hlSite"){ S.hlSite=t.value; render(); return; }
   if(t.classList.contains("sel")){ t.checked?S.selected.add(t.dataset.w):S.selected.delete(t.dataset.w); render(); return; }
   if(t.id==="selAll"){ document.querySelectorAll("#view-roster tbody input.sel").forEach(i=>{t.checked?S.selected.add(i.dataset.w):S.selected.delete(i.dataset.w)}); render(); return; }
-  if(t.matches("select.site") && sid0(t)===HL){ const wid=t.dataset.w, f=isoOf(S.monthKey,S.day);
-    if(!editable()){ PR.hlFrom=f; openProfile(wid); return; }
-    const list=[...((S.workers[wid]||{}).homeLeave||[])]; list.push({from:f,to:f}); list.sort((a,b)=>a.from<b.from?-1:1);
-    S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true);
-    toast(`Home leave starts ${fmtDate(f)}. Type the number of days.`); render();
-    const el=document.getElementById("hlr-"+wid); if(el){ el.focus(); el.select(); } return; }
+  if(t.matches("select.site") && isLeave(sid0(t))){ const wid=t.dataset.w, type=sid0(t), f=isoOf(S.monthKey,S.day);
+    if(!editable()){ PR.lvFrom={type,from:f}; openProfile(wid); return; }
+    saveLeave(wid,type,[...leaveList(wid,type),{from:f,to:f}]);
+    toast(`${LT[type].label} starts ${fmtDate(f)}. Type the number of days.`); render();
+    const el=document.getElementById("lvr-"+wid); if(el){ el.focus(); el.select(); } return; }
   if(t.matches("select.site") && editable()){ const wid=t.dataset.w, sid=t.value, d=S.day, old=runInfo(wid,d);
     if(!sid) setDay(wid,d,null,true);
     else if(sid===OFF) setDay(wid,d,{s:OFF,n:0,o:0,h:0},true);
@@ -1582,15 +1628,14 @@ document.addEventListener("change", e=>{
     if(len<1) len=1; if(len>mx) len=mx; const got=setRun(wid,d,len);
     const ri=runInfo(wid,d); toast(`${S.workers[wid].name}: ${siteName(dayRec(wid,d).s)} for ${got} day${got>1?"s":""}, until ${shortDay(S.monthKey,ri.last)}.`);
     render(); return; }
-  if(t.dataset.hlr){ const wid=t.dataset.hlr, f=t.dataset.hlfrom, n=parseInt(t.value,10); const list=[...((S.workers[wid]||{}).homeLeave||[])]; const i=list.findIndex(q=>q.from===f); if(i<0) return;
-    if(!n||n<1){ toast("Enter at least 1 day."); render(); return; } const to=addDaysIso(f,n-1);
-    if(list.some((q,j)=>j!==i && !(to<q.from||f>q.to))){ toast("That would overlap another home leave."); render(); return; }
-    list[i]={from:f,to}; S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true);
-    toast(`Home leave: ${n} day${n>1?"s":""}, ${fmtDate(f)} to ${fmtDate(to)}. Back at work ${fmtDate(addDaysIso(to,1))}.`); render(); return; }
-  if(t.dataset.hldays!==undefined && t.dataset.hlw){ const wid=t.dataset.hlw, i=+t.dataset.hldays, n=parseInt(t.value,10); const list=[...((S.workers[wid]||{}).homeLeave||[])]; const pr=list[i]; if(!pr) return;
-    if(!n||n<1){ toast("Enter at least 1 day."); render(); return; } const to=addDaysIso(pr.from,n-1);
-    if(list.some((q,j)=>j!==i && !(to<q.from||pr.from>q.to))){ toast("That would overlap another home leave."); render(); return; }
-    list[i]={from:pr.from,to}; S.workers[wid]={...S.workers[wid],homeLeave:list}; saveDoc("workers",wid,{homeLeave:list},true); toast(`Home leave now ${n} day${n>1?"s":""}: ${fmtDate(pr.from)} to ${fmtDate(to)}.`); render(); return; }
+  if(t.dataset.lvr || (t.dataset.lvdays!==undefined && t.dataset.lvw)){ const wid=t.dataset.lvr||t.dataset.lvw, type=t.dataset.lt, list=[...leaveList(wid,type)];
+    const i = t.dataset.lvr ? list.findIndex(q=>q.from===t.dataset.lvfrom) : +t.dataset.lvdays; const pr=list[i]; if(!pr) return; const n=parseInt(t.value,10);
+    if(!n||n<1){ toast("Enter at least 1 day."); render(); return; } const to=addDaysIso(pr.from,n-1), ov=leaveOverlaps(wid,pr.from,to,type,pr.from);
+    if(ov){ toast(`That would overlap ${ov}.`); render(); return; }
+    list[i]={...pr,to}; saveLeave(wid,type,list); toast(`${LT[type].label}: ${n} day${n>1?"s":""}, ${fmtDate(pr.from)} to ${fmtDate(to)}. Back at work ${fmtDate(addDaysIso(to,1))}.`); render(); return; }
+  if(t.dataset.lvhosp!==undefined || t.dataset.lvhospr){ const wid=t.dataset.lvw||t.dataset.lvhospr, list=[...leaveList(wid,"mc")];
+    const i = t.dataset.lvhospr ? list.findIndex(q=>q.from===t.dataset.lvfrom) : +t.dataset.lvhosp; if(!list[i]) return;
+    const rec={...list[i]}; if(t.checked) rec.hosp=true; else delete rec.hosp; list[i]=rec; saveLeave(wid,"mc",list); toast(t.checked?"Marked as hospitalisation leave.":"Marked as outpatient MC."); render(); return; }
   if(t.id==="impFile"&&t.files&&t.files[0]){ readImportFile(t.files[0]); t.value=""; return; }
   if(t.id==="impDropPh"){ IMP.dropPlaceholders=t.checked; return; }
   if(t.dataset.date&&t.dataset.dwid){ const iso=dmyToIso(t.value); if(iso===null){ t.classList.add("bad"); toast("Type the date as DD/MM/YYYY, for example 15/03/1990."); return; } saveDate(t.dataset.dwid,t.dataset.date,iso,t); return; }
@@ -1615,11 +1660,11 @@ document.addEventListener("input", e=>{
   const t=e.target;
   if(t.id==="fSearch"){ S.search=t.value; render(); return; }
   if(t.id==="prSearch"){ PR.q=t.value; render(); return; }
-  if(t.id==="hl-days"){ hlPreview(); return; }
-  if(t.dataset.date){ if(e.inputType && e.inputType.startsWith("delete")){ if(t.id==="hl-from") hlPreview(); return; } const raw=t.value;
+  if(/^(hl|mc)-days$/.test(t.id)){ lvPreview(t.id.slice(0,2)); return; }
+  if(t.dataset.date){ if(e.inputType && e.inputType.startsWith("delete")){ if(/^(hl|mc)-from$/.test(t.id)) lvPreview(t.id.slice(0,2)); return; } const raw=t.value;
     let v=raw; if(/^\d+$/.test(v) && v.length>2){ const d=v.slice(0,8); v=d.slice(0,2)+"/"+d.slice(2,4)+(d.length>4?"/"+d.slice(4):""); }
     if(/^\d{2}$/.test(v) || /^\d{1,2}\/\d{2}$/.test(v)) v+="/"; v=v.replace(/\/{2,}/g,"/"); if(v!==raw) t.value=v;
-    t.classList.remove("bad"); if(t.id==="hl-from") hlPreview(); return; }
+    t.classList.remove("bad"); if(/^(hl|mc)-from$/.test(t.id)) lvPreview(t.id.slice(0,2)); return; }
   if(t.dataset.w&&t.dataset.f&&editable()){ let v=Math.min(24,Math.max(0,num(t.value))); const wid=t.dataset.w, d=S.day; const r=dayRec(wid,d);
     setDay(wid,d,{s:r.s,n:r.n,o:r.o,h:r.h,[t.dataset.f]:v},false); refreshRosterRow(wid); return; }
   if(t.dataset.adj&&editable()){ const wid=t.dataset.adj; patchMonth({entries:{[wid]:{adj:num(t.value)}}},false);
@@ -1628,9 +1673,10 @@ document.addEventListener("input", e=>{
 });
 document.addEventListener("focusout", e=>{ const t=e.target; if(t.dataset&&(t.dataset.f||t.dataset.adj)) flushMonth(); });
 document.addEventListener("keydown", e=>{ const t=e.target; if(e.key!=="Enter"||!t.dataset) return;
-  if(t.dataset.date && t.id!=="hl-from"){ e.preventDefault(); t.blur(); return; }
-  if(t.id==="hl-days"||t.id==="hl-from"){ e.preventDefault(); const bt=document.querySelector("[data-hladd]"); if(t.id==="hl-from"){ const d=$("#hl-days"); if(d) d.focus(); } else if(bt) bt.click(); return; }
-  if(t.dataset.hldays!==undefined || t.dataset.hlr){ e.preventDefault(); t.blur(); return; }
+  const lvm=/^(hl|mc)-(from|days)$/.exec(t.id||"");
+  if(lvm){ e.preventDefault(); if(lvm[2]==="from"){ const d=$("#"+lvm[1]+"-days"); if(d) d.focus(); } else { const bt=document.querySelector(`[data-lvadd][data-lt="${lvm[1]}"]`); if(bt) bt.click(); } return; }
+  if(t.dataset.date){ e.preventDefault(); t.blur(); return; }
+  if(t.dataset.lvdays!==undefined || t.dataset.lvr){ e.preventDefault(); t.blur(); return; }
   if(t.dataset.run){ e.preventDefault(); t.blur(); return; }
   if(!t.dataset.f) return; e.preventDefault();
   const col=[...document.querySelectorAll(`#view-roster input[data-f="${t.dataset.f}"]`)]; const i=col.indexOf(t); const nx=col[e.shiftKey?i-1:i+1]; if(nx){nx.focus();nx.select()} });
